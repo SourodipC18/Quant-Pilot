@@ -146,7 +146,7 @@ h2 { margin: 4px 0 0; font-size: 13px; letter-spacing: -.015em; font-weight: 650
 .positive { color: var(--positive) !important; }
 .warning { color: var(--warning) !important; }
 .lower-grid { display: grid; grid-template-columns: 1fr 1.15fr; gap: 14px; }
-.confidence-panel, .checks-panel, .recent-panel { padding: 17px 18px 14px; }
+.confidence-panel, .checks-panel, .recent-panel { min-width: 0; padding: 17px 18px 14px; }
 .confidence-score { display: flex; align-items: baseline; gap: 8px; margin-top: 14px; }
 .confidence-score strong { font-size: 23px; letter-spacing: -.05em; }
 .confidence-score span { color: var(--muted); font-size: 9px; }
@@ -154,10 +154,10 @@ h2 { margin: 4px 0 0; font-size: 13px; letter-spacing: -.015em; font-weight: 650
 .positive-tag { color: var(--positive) !important; background: var(--positive-soft); border-radius: 4px; padding: 4px 5px; margin-left: auto; }
 .confidence-panel .recharts-responsive-container { margin-top: 7px; }
 .check-list { display: flex; flex-direction: column; gap: 12px; margin-top: 17px; }
-.check-list > div { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 8px; }
+.check-list > div { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; }
 .check-list strong { display: block; font-size: 10px; font-weight: 580; }
 .check-list small { display: block; color: var(--muted); font-size: 9px; margin-top: 3px; }
-.check-list b { font-size: 9px; font-weight: 600; }
+.check-list b { min-width: 0; max-width: 45%; font-size: 9px; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 .check-icon, .warning-icon { width: 17px; height: 17px; display: grid; place-items: center; background: var(--positive-soft); color: var(--positive); border-radius: 50%; }
 .warning-icon { background: var(--warning-soft); color: var(--warning); }
 .check-icon svg, .warning-icon svg { width: 10px; height: 10px; }
