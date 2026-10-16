@@ -170,7 +170,7 @@ h2 { margin: 4px 0 0; font-size: 13px; letter-spacing: -.015em; font-weight: 650
 .check-list > div { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; }
 .check-list strong { display: block; font-size: 10px; font-weight: 580; }
 .check-list small { display: block; color: var(--muted); font-size: 9px; margin-top: 3px; }
-.check-list b { min-width: 0; max-width: 45%; font-size: 9px; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.check-list b { min-width: max-content; max-width: 100%; font-size: 9px; font-weight: 600; text-align: right; white-space: nowrap; }
 .check-icon, .warning-icon { width: 17px; height: 17px; display: grid; place-items: center; background: var(--positive-soft); color: var(--positive); border-radius: 50%; }
 .warning-icon { background: var(--warning-soft); color: var(--warning); }
 .check-icon svg, .warning-icon svg { width: 10px; height: 10px; }

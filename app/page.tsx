@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, Database, LineChart, LoaderCircle, Moon, RefreshCw, Search, Sun, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { annualizedVolatility, calmarRatio, dailyReturns as calculateDailyReturns, downsideDeviation as calculateDownsideDeviation, historicalCVaR, historicalVaR, maxDrawdown as calculateMaxDrawdown, periodReturn, sampleStandardDeviation, sharpeRatio } from '@/lib/analytics'
 
 type Instrument = { symbol?: string; instrument_name?: string; exchange?: string; country?: string; currency?: string; type?: string; instrument_type?: string }
 type Bar = { datetime: string; open: string; high: string; low: string; close: string; volume?: string }
@@ -23,33 +24,43 @@ function Metric({ label, value, detail, tone = '' }: { label: string; value: str
 
 export default function Page() {
   const [dark, setDark] = useState(true), [workspace, setWorkspace] = useState<Workspace>('Research Workbench'), [query, setQuery] = useState(''), [results, setResults] = useState<Instrument[]>([]), [instrument, setInstrument] = useState<Instrument | null>(null), [bars, setBars] = useState<Bar[]>([]), [loading, setLoading] = useState(false), [searching, setSearching] = useState(false), [error, setError] = useState(''), [configured, setConfigured] = useState<boolean | null>(null), [range, setRange] = useState('6M')
-  useEffect(() => { fetch('/api/market?action=status').then(r => r.json()).then(data => setConfigured(data.configured)).catch(() => setConfigured(false)) }, [])
-  useEffect(() => { const value = query.trim(); if (value.length < 2 || instrument?.symbol === value) { setResults([]); return }; const timer = setTimeout(async () => { setSearching(true); setError(''); try { const response = await fetch(`/api/market?action=search&q=${encodeURIComponent(value)}`); const data = await response.json(); if (!response.ok) throw new Error(data.error); setResults(data.data ?? []) } catch (reason) { setError(formatError(reason)); setResults([]) } finally { setSearching(false) } }, 350); return () => clearTimeout(timer) }, [query])
-  async function selectInstrument(item: Instrument) { setInstrument(item); setQuery(item.symbol ?? ''); setResults([]); setLoading(true); setError(''); try { const response = await fetch(`/api/market?action=history&symbol=${encodeURIComponent(item.symbol ?? '')}`); const data = await response.json(); if (!response.ok) throw new Error(data.error); setBars(data.values ?? []) } catch (reason) { setBars([]); setError(formatError(reason)) } finally { setLoading(false) } }
+  const requestId = useRef(0)
+  useEffect(() => { const controller = new AbortController(); fetch('/api/market?action=status', { signal: controller.signal }).then(r => r.json()).then(data => setConfigured(data.configured)).catch(() => { if (!controller.signal.aborted) setConfigured(false) }); return () => controller.abort() }, [])
+  useEffect(() => { const value = query.trim(); if (value.length < 2 || instrument?.symbol === value) { setResults([]); return }; const controller = new AbortController(); const timer = setTimeout(async () => { setSearching(true); setError(''); try { const response = await fetch(`/api/market?action=search&q=${encodeURIComponent(value)}`, { signal: controller.signal }); const data = await response.json(); if (!response.ok) throw new Error(data.error); setResults(data.data ?? []) } catch (reason) { if (!controller.signal.aborted) { setError(formatError(reason)); setResults([]) } } finally { if (!controller.signal.aborted) setSearching(false) } }, 350); return () => { clearTimeout(timer); controller.abort() } }, [query, instrument?.symbol])
+  async function selectInstrument(item: Instrument) { const currentRequest = ++requestId.current; setInstrument(item); setQuery(item.symbol ?? ''); setResults([]); setBars([]); setLoading(true); setError(''); try { const response = await fetch(`/api/market?action=history&symbol=${encodeURIComponent(item.symbol ?? '')}`); const data = await response.json(); if (!response.ok) throw new Error(data.error); if (currentRequest === requestId.current) setBars(data.values ?? []) } catch (reason) { if (currentRequest === requestId.current) { setBars([]); setError(formatError(reason)) } } finally { if (currentRequest === requestId.current) setLoading(false) } }
   useEffect(() => { if (configured && !instrument) selectInstrument(popularCompanies[0]) }, [configured])
   const chartData = useMemo(() => bars.map(bar => ({ date: bar.datetime.slice(0, 10), close: Number(bar.close), high: Number(bar.high), low: Number(bar.low), volume: Number(bar.volume ?? 0) })).filter(row => Number.isFinite(row.close)), [bars])
   const visibleData = useMemo(() => { const counts: Record<string, number> = { '1M': 22, '3M': 66, '6M': 132, '1Y': 252 }; return range === 'All' ? chartData : chartData.slice(-(counts[range] ?? chartData.length)) }, [chartData, range])
-  const latest = visibleData.at(-1)?.close ?? null, first = visibleData[0]?.close ?? null
-  const returnValue = latest && first ? (latest / first - 1) * 100 : null
-  const dailyReturns = visibleData.slice(1).map((row, index) => row.close / visibleData[index].close - 1).filter(Number.isFinite)
-  const volatility = dailyReturns.length > 1 ? Math.sqrt(dailyReturns.reduce((sum, value) => sum + value ** 2, 0) / dailyReturns.length) * Math.sqrt(252) * 100 : null
-  const high = visibleData.length ? Math.max(...visibleData.map(row => row.high || row.close)) : null, low = visibleData.length ? Math.min(...visibleData.map(row => row.low || row.close)) : null
-  const maxDrawdown = visibleData.reduce((state, row) => { const peak = Math.max(state.peak, row.close); return { peak, drawdown: Math.min(state.drawdown, row.close / peak - 1) } }, { peak: 0, drawdown: 0 }).drawdown * 100
-  const averageVolume = visibleData.length ? visibleData.reduce((sum, row) => sum + row.volume, 0) / visibleData.length : null, sma20 = visibleData.length >= 20 ? visibleData.slice(-20).reduce((sum, row) => sum + row.close, 0) / 20 : null
-  const downsideReturns = dailyReturns.filter(value => value < 0), downsideDeviation = downsideReturns.length > 1 ? Math.sqrt(downsideReturns.reduce((sum, value) => sum + value ** 2, 0) / downsideReturns.length) * Math.sqrt(252) * 100 : null
+  const latest = visibleData.at(-1)?.close ?? null
+  const first = visibleData[0]?.close ?? null
+  const returnValue = periodReturn(visibleData.map(row => ({ datetime: row.date, close: row.close })))
+  const dailyReturns = calculateDailyReturns(visibleData.map(row => ({ datetime: row.date, close: row.close })))
+  const volatilityValue = annualizedVolatility(dailyReturns)
+  const volatility = volatilityValue == null ? null : volatilityValue * 100
+  const high = visibleData.length ? Math.max(...visibleData.map(row => row.close)) : null
+  const low = visibleData.length ? Math.min(...visibleData.map(row => row.close)) : null
+  const maxDrawdownValue = calculateMaxDrawdown(visibleData.map(row => ({ datetime: row.date, close: row.close })))
+  const maxDrawdown = maxDrawdownValue == null ? 0 : maxDrawdownValue * 100
+  const averageVolume = visibleData.length ? visibleData.reduce((sum, row) => sum + row.volume, 0) / visibleData.length : null
+  const sma20 = visibleData.length >= 20 ? visibleData.slice(-20).reduce((sum, row) => sum + row.close, 0) / 20 : null
+  const downsideDeviationValue = calculateDownsideDeviation(dailyReturns)
+  const downsideDeviation = downsideDeviationValue == null ? null : downsideDeviationValue * Math.sqrt(252) * 100
   const positiveDays = dailyReturns.filter(value => value > 0), negativeDays = dailyReturns.filter(value => value < 0), winRate = dailyReturns.length ? positiveDays.length / dailyReturns.length * 100 : null
-  const meanReturn = dailyReturns.length ? dailyReturns.reduce((sum, value) => sum + value, 0) / dailyReturns.length : null
-  const sharpe = meanReturn != null && volatility ? meanReturn * 252 / (volatility / 100 * Math.sqrt(252)) : null
-  const var95 = dailyReturns.length > 4 ? [...dailyReturns].sort((a, b) => a - b)[Math.floor(dailyReturns.length * 0.05)] * 100 : null
-  const cvar95 = dailyReturns.length > 4 ? dailyReturns.filter(value => value * 100 <= (var95 ?? 0)).reduce((sum, value, _, values) => sum + value * 100 / values.length, 0) : null
+  const sharpeValue = sharpeRatio(dailyReturns)
+  const sharpe = sharpeValue == null ? null : sharpeValue
+  const varValue = historicalVaR(dailyReturns), cvarValue = historicalCVaR(dailyReturns)
+  const var95 = varValue == null ? null : varValue * 100
+  const cvar95 = cvarValue == null ? null : cvarValue * 100
   const gainLossRatio = negativeDays.length && positiveDays.length ? positiveDays.reduce((sum, value) => sum + value, 0) / Math.abs(negativeDays.reduce((sum, value) => sum + value, 0)) : null
   const trend = latest && sma20 ? latest >= sma20 ? 'Bullish' : 'Bearish' : 'Awaiting data', analysisReady = Boolean(instrument && visibleData.length)
   const meanPositive = positiveDays.length ? positiveDays.reduce((sum, value) => sum + value, 0) / positiveDays.length : null
   const meanNegative = negativeDays.length ? negativeDays.reduce((sum, value) => sum + value, 0) / negativeDays.length : null
   const bestDay = dailyReturns.length ? Math.max(...dailyReturns) * 100 : null
   const worstDay = dailyReturns.length ? Math.min(...dailyReturns) * 100 : null
-  const calmar = maxDrawdown < 0 && returnValue != null ? returnValue / Math.abs(maxDrawdown) : null
-  const skewProxy = dailyReturns.length > 2 && volatility ? dailyReturns.reduce((sum, value) => sum + ((value - (meanReturn ?? 0)) / (volatility / 100 / Math.sqrt(252))) ** 3, 0) / dailyReturns.length : null
+  const calmar = calmarRatio(visibleData.map(row => ({ datetime: row.date, close: row.close })))
+  const meanReturn = dailyReturns.length ? dailyReturns.reduce((sum, value) => sum + value, 0) / dailyReturns.length : null
+  const deviation = sampleStandardDeviation(dailyReturns)
+  const skewProxy = dailyReturns.length > 2 && deviation ? dailyReturns.reduce((sum, value) => sum + ((value - (meanReturn ?? 0)) / deviation) ** 3, 0) / dailyReturns.length : null
   const tailLoss = cvar95 != null ? Math.abs(cvar95) : null
   const stressLoss = volatility != null ? volatility * 2.33 : null
   const runAnalysis = () => instrument && selectInstrument(instrument)
