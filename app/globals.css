@@ -82,6 +82,19 @@ h1 { font-size: 27px; line-height: 1.1; letter-spacing: -.045em; margin: 0; font
 .instrument-stats span { color: var(--faint); font-size: 9px; }
 .instrument-stats strong { font-size: 13px; font-variant-numeric: tabular-nums; }
 .workspace-grid { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 18px; align-items: start; }
+.analysis-section-grid { display: flex; flex-direction: column; gap: 14px; }
+.analysis-section-grid > .workspace-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
+.diagnostic-table { display: flex; flex-direction: column; margin-top: 14px; }
+.diagnostic-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 11px 0; border-top: 1px solid var(--border); }
+.diagnostic-row strong { display: block; font-size: 10px; font-weight: 600; }
+.diagnostic-row small { display: block; color: var(--muted); font-size: 9px; line-height: 1.35; margin-top: 3px; }
+.diagnostic-row b { color: var(--foreground); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.analysis-output { min-height: 112px; display: flex; flex-direction: column; gap: 7px; padding-top: 14px; }
+.analysis-output strong { font-size: 24px; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
+.analysis-output > span { color: var(--muted); font-size: 10px; }
+.formula { color: var(--faint); font-size: 9px; line-height: 1.5; margin-top: auto; }
+.panel-action { margin-left: auto; margin-top: -25px; display: flex; justify-content: flex-end; }
+.panel-action + .check-list { margin-top: 16px; }
 .config-panel { overflow: hidden; }
 .panel-heading, .panel-header { display: flex; justify-content: space-between; align-items: flex-start; }
 .panel-heading { padding: 17px 16px 14px; border-bottom: 1px solid var(--border); }
