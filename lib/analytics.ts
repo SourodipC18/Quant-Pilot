@@ -68,14 +68,58 @@ export function periodReturn(points: PricePoint[]): number | null {
   return prices.length >= 2 ? prices.at(-1)!.close / prices[0].close - 1 : null
 }
 
-export function calmarRatio(points: PricePoint[], periods = 252): number | null {
+export function sortinoRatio(values: number[], annualRiskFreeRate = 0, periods = 252): number | null {
+  if (values.length < 2) return null
+  const target = annualRiskFreeRate / periods
+  const downside = downsideDeviation(values, target)
+  if (downside == null || downside === 0) return null
+  return ((mean(values) ?? 0) - target) / downside * Math.sqrt(periods)
+}
+
+export function compoundAnnualGrowthRate(points: PricePoint[], periods = 252): number | null {
   const prices = cleanPrices(points)
-  const result = periodReturn(prices)
-  const drawdown = maxDrawdown(prices)
-  if (result == null || drawdown == null || drawdown === 0 || prices.length < 2) return null
-  const days = Math.max(1, (Date.parse(prices.at(-1)!.datetime) - Date.parse(prices[0].datetime)) / 86400000)
-  const annualized = (1 + result) ** (periods / days) - 1
-  return annualized / Math.abs(drawdown)
+  if (prices.length < 2 || prices[0].close <= 0 || prices.at(-1)!.close <= 0) return null
+  return (prices.at(-1)!.close / prices[0].close) ** (periods / (prices.length - 1)) - 1
+}
+
+export function calmarRatio(points: PricePoint[], periods = 252): number | null {
+  const drawdown = maxDrawdown(points)
+  const cagr = compoundAnnualGrowthRate(points, periods)
+  if (cagr == null || drawdown == null || drawdown === 0) return null
+  return cagr / Math.abs(drawdown)
+}
+
+export function simpleMovingAverage(values: number[], window: number): (number | null)[] {
+  if (!Number.isInteger(window) || window < 1) return values.map(() => null)
+  return values.map((_, index) => index + 1 < window ? null : mean(values.slice(index + 1 - window, index + 1)))
+}
+
+export function exponentialMovingAverage(values: number[], window: number): (number | null)[] {
+  if (!Number.isInteger(window) || window < 1 || values.length < window) return values.map(() => null)
+  const result: (number | null)[] = values.map(() => null)
+  let previous = mean(values.slice(0, window))
+  result[window - 1] = previous
+  const multiplier = 2 / (window + 1)
+  for (let index = window; index < values.length; index += 1) {
+    previous = (values[index] - (previous ?? values[index])) * multiplier + (previous ?? values[index])
+    result[index] = previous
+  }
+  return result
+}
+
+export function relativeStrengthIndex(values: number[], window = 14): number | null {
+  if (values.length <= window || window < 1) return null
+  const changes = values.slice(1).map((value, index) => value - values[index])
+  const gains = changes.slice(0, window).map((value) => Math.max(value, 0))
+  const losses = changes.slice(0, window).map((value) => Math.max(-value, 0))
+  let averageGain = mean(gains) ?? 0
+  let averageLoss = mean(losses) ?? 0
+  for (const change of changes.slice(window)) {
+    averageGain = (averageGain * (window - 1) + Math.max(change, 0)) / window
+    averageLoss = (averageLoss * (window - 1) + Math.max(-change, 0)) / window
+  }
+  if (averageLoss === 0) return averageGain === 0 ? 50 : 100
+  return 100 - 100 / (1 + averageGain / averageLoss)
 }
 
 export function quantile(values: number[], probability: number): number | null {

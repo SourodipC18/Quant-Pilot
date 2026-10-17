@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { annualizedVolatility, dailyReturns, historicalCVaR, historicalVaR, maxDrawdown, periodReturn, sharpeRatio } from './analytics'
+import { annualizedVolatility, compoundAnnualGrowthRate, dailyReturns, historicalCVaR, historicalVaR, maxDrawdown, periodReturn, relativeStrengthIndex, sharpeRatio, sortinoRatio } from './analytics'
 
 describe('analytics calculations', () => {
   const prices = [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }, { datetime: '2026-01-03', close: 99 }]
@@ -13,7 +13,12 @@ describe('analytics calculations', () => {
   it('keeps risk metrics finite for valid samples', () => {
     const returns = dailyReturns(prices)
     expect(sharpeRatio(returns)).toBeTypeOf('number')
+    expect(sortinoRatio(returns)).toBeTypeOf('number')
     expect(historicalVaR(returns)).toBeTypeOf('number')
     expect(historicalCVaR(returns)).toBeTypeOf('number')
+  })
+  it('annualizes growth over observations and guards indicator warmup', () => {
+    expect(compoundAnnualGrowthRate(prices)).toBeTypeOf('number')
+    expect(relativeStrengthIndex([1, 2, 3], 14)).toBeNull()
   })
 })
