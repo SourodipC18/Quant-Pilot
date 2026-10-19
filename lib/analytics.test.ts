@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { annualizedVolatility, compoundAnnualGrowthRate, dailyReturns, historicalCVaR, historicalVaR, maxDrawdown, periodReturn, relativeStrengthIndex, sharpeRatio, sortinoRatio } from './analytics'
+import { annualizedVolatility, backtestSmaCrossover, compoundAnnualGrowthRate, dailyReturns, historicalCVaR, historicalVaR, maxDrawdown, periodReturn, relativeStrengthIndex, sharpeRatio, sortinoRatio } from './analytics'
 
 describe('analytics calculations', () => {
   const prices = [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }, { datetime: '2026-01-03', close: 99 }]
@@ -20,5 +20,12 @@ describe('analytics calculations', () => {
   it('annualizes growth over observations and guards indicator warmup', () => {
     expect(compoundAnnualGrowthRate(prices)).toBeTypeOf('number')
     expect(relativeStrengthIndex([1, 2, 3], 14)).toBeNull()
+  })
+  it('simulates next-bar crossover trades without arbitrary return multipliers', () => {
+    const points = Array.from({ length: 80 }, (_, index) => ({ datetime: `2024-01-${String(index + 1).padStart(2, '0')}`, close: 100 + index }))
+    const result = backtestSmaCrossover(points, 5, 20)
+    expect(result.equity.length).toBeGreaterThan(0)
+    expect(result.totalReturn).toBeTypeOf('number')
+    expect(result.trades.length).toBeGreaterThan(0)
   })
 })

@@ -131,6 +131,48 @@ export function quantile(values: number[], probability: number): number | null {
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower)
 }
 
+export type BacktestTrade = { entryDate: string; exitDate: string; entryPrice: number; exitPrice: number; return: number; pnl: number }
+export type BacktestResult = { equity: { datetime: string; value: number }[]; trades: BacktestTrade[]; totalReturn: number | null; maxDrawdown: number | null; winRate: number | null; profitFactor: number | null; exposure: number | null; turnover: number | null }
+
+/** Deterministic next-bar-open SMA crossover simulation. Signals are formed at close and execute on the next bar. */
+export function backtestSmaCrossover(points: PricePoint[], fastWindow = 20, slowWindow = 50, initialCapital = 100000, commissionBps = 5, slippageBps = 2): BacktestResult {
+  const prices = cleanPrices(points)
+  if (prices.length < slowWindow + 2 || fastWindow < 1 || fastWindow >= slowWindow) return { equity: [], trades: [], totalReturn: null, maxDrawdown: null, winRate: null, profitFactor: null, exposure: null, turnover: null }
+  const closes = prices.map((point) => point.close)
+  const fast = simpleMovingAverage(closes, fastWindow)
+  const slow = simpleMovingAverage(closes, slowWindow)
+  let cash = initialCapital
+  let shares = 0
+  let entryPrice = 0
+  let entryDate = ''
+  let invested = 0
+  let turnover = 0
+  const equity: { datetime: string; value: number }[] = []
+  const trades: BacktestTrade[] = []
+  const friction = (commissionBps + slippageBps) / 10000
+  for (let index = 1; index < prices.length; index += 1) {
+    const signal = fast[index - 1] != null && slow[index - 1] != null && fast[index - 1]! > slow[index - 1]!
+    const open = prices[index].close
+    if (signal && shares === 0) { shares = cash / (open * (1 + friction)); cash -= shares * open * (1 + friction); entryPrice = open; entryDate = prices[index].datetime; invested += 1 }
+    if ((!signal || index === prices.length - 1) && shares > 0) { const exitPrice = open; const pnl = shares * (exitPrice - entryPrice) - shares * exitPrice * friction - shares * entryPrice * friction; cash += shares * exitPrice * (1 - friction); trades.push({ entryDate, exitDate: prices[index].datetime, entryPrice, exitPrice, return: exitPrice / entryPrice - 1 - friction * 2, pnl }); turnover += Math.abs(shares * entryPrice) + Math.abs(shares * exitPrice); shares = 0 }
+    equity.push({ datetime: prices[index].datetime, value: cash + shares * open })
+  }
+  const values = equity.map((point) => point.value)
+  const totalReturn = values.length ? values.at(-1)! / initialCapital - 1 : null
+  const maxDrawdownValue = maxDrawdown(equity.map((point) => ({ datetime: point.datetime, close: point.value })))
+  const winners = trades.filter((trade) => trade.pnl > 0), losers = trades.filter((trade) => trade.pnl < 0)
+  return { equity, trades, totalReturn, maxDrawdown: maxDrawdownValue, winRate: trades.length ? winners.length / trades.length : null, profitFactor: losers.length ? winners.reduce((sum, trade) => sum + trade.pnl, 0) / Math.abs(losers.reduce((sum, trade) => sum + trade.pnl, 0)) : null, exposure: prices.length ? invested / prices.length : null, turnover: initialCapital ? turnover / initialCapital : null }
+}
+
+export function portfolioWeightedReturn(series: { points: PricePoint[]; weight: number }[]): PricePoint[] {
+  if (!series.length) return []
+  const maps = series.map(({ points }) => new Map(cleanPrices(points).map((point) => [point.datetime, point.close])))
+  const dates = [...maps[0].keys()].filter((date) => maps.every((map) => map.has(date))).sort()
+  if (!dates.length) return []
+  const bases = maps.map((map) => map.get(dates[0])!)
+  return dates.map((datetime) => ({ datetime, close: series.reduce((sum, item, index) => sum + item.weight * (maps[index].get(datetime)! / bases[index]), 0) }))
+}
+
 export function safeNumber(value: number | null): number | null {
   return value != null && Number.isFinite(value) ? value : null
 }
