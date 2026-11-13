@@ -3,8 +3,8 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'QuantPilot — Research Workbench',
-  description: 'A transparent quantitative research terminal for historical analysis, model validation, and paper simulation.',
+  title: { default: 'QuantPilot — Quantitative Research Terminal', template: '%s · QuantPilot' },
+  description: 'Research market history, test systematic strategies, track portfolio risk, and compare experiments in a private quantitative research workspace.',
   generator: 'v0.app',
   icons: {
     icon: [
@@ -26,6 +26,8 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
   colorScheme: 'light dark',
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: 'white' },

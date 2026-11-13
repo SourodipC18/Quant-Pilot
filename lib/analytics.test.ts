@@ -22,7 +22,7 @@ describe('analytics calculations', () => {
     expect(relativeStrengthIndex([1, 2, 3], 14)).toBeNull()
   })
   it('simulates next-bar crossover trades without arbitrary return multipliers', () => {
-    const points = Array.from({ length: 80 }, (_, index) => ({ datetime: `2024-01-${String(index + 1).padStart(2, '0')}`, close: 100 + index }))
+    const points = Array.from({ length: 100 }, (_, index) => ({ datetime: new Date(Date.UTC(2024, 0, index + 1)).toISOString().slice(0, 10), close: index < 48 ? 200 - index : 152 + (index - 48) * 2 }))
     const result = backtestSmaCrossover(points, 5, 20)
     expect(result.equity.length).toBeGreaterThan(0)
     expect(result.totalReturn).toBeTypeOf('number')
