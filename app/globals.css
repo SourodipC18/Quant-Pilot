@@ -407,6 +407,12 @@ h2 { margin: 4px 0 0; font-size: 13px; letter-spacing: -.015em; font-weight: 650
 .auth-submit { height: 40px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 6px; background: #a7e66a; color: #11160d; font-size: 11px; font-weight: 650; margin-top: 3px; }
 .auth-submit:disabled { opacity: .65; cursor: wait; }
 .auth-submit svg:last-child { margin-left: auto; margin-right: 12px; }
+.auth-demo { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid #30323b; border-radius: 6px; background: #181b22; color: #e4e4e7; text-align: left; font-size: 11px; cursor: pointer; }
+.auth-demo:hover:not(:disabled) { border-color: #a7e66a; }
+.auth-demo:focus-visible { outline: 2px solid #a7e66a; outline-offset: 2px; }
+.auth-demo:disabled { opacity: .65; cursor: wait; }
+.auth-demo-copy { display: flex; flex-direction: column; gap: 4px; }
+.auth-demo-copy small { color: #8b8d98; font-size: 9px; }
 .auth-switch { padding-top: 18px; color: #a1a1aa; font-size: 10px; text-align: center; }
 .auth-switch button { border: 0; background: transparent; color: #a7e66a; font-weight: 650; }
 .auth-note { display: flex; align-items: center; justify-content: center; gap: 6px; padding-top: 21px; border-top: 1px solid #30323b; margin-top: 22px; color: #858792; font-size: 9px; }
