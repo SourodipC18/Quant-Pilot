@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { annualizedVolatility, backtestSmaCrossover, compoundAnnualGrowthRate, dailyReturns, historicalCVaR, historicalVaR, maxDrawdown, periodReturn, relativeStrengthIndex, sharpeRatio, sortinoRatio } from './analytics'
+import { annualizedVolatility, backtestSmaCrossover, compoundAnnualGrowthRate, dailyReturns, historicalCVaR, historicalVaR, maxDrawdown, monteCarloBootstrap, periodReturn, regressionRiskMetrics, relativeStrengthIndex, sharpeRatio, sortinoRatio, walkForwardValidation } from './analytics'
 
 describe('analytics calculations', () => {
   const prices = [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }, { datetime: '2026-01-03', close: 99 }]
@@ -27,5 +27,27 @@ describe('analytics calculations', () => {
     expect(result.equity.length).toBeGreaterThan(0)
     expect(result.totalReturn).toBeTypeOf('number')
     expect(result.trades.length).toBeGreaterThan(0)
+    expect(result.trades[0].costs).toBeGreaterThan(0)
+  })
+  it('estimates factor risk from aligned strategy and benchmark returns', () => {
+    const metrics = regressionRiskMetrics([0.02, -0.01, 0.04, 0.01], [0.01, -0.005, 0.02, 0.005])
+    expect(metrics.beta).toBeCloseTo(2)
+    expect(metrics.correlation).toBeCloseTo(1)
+    expect(metrics.trackingError).toBeGreaterThan(0)
+    expect(metrics.alpha).toBeTypeOf('number')
+  })
+  it('repeats deterministic Monte Carlo paths for the same seed', () => {
+    const first = monteCarloBootstrap([-0.02, -0.01, 0.005, 0.01, 0.02], 10000, 20, 250, 7)
+    const second = monteCarloBootstrap([-0.02, -0.01, 0.005, 0.01, 0.02], 10000, 20, 250, 7)
+    expect(first.fan).toEqual(second.fan)
+    expect(first.fan).toHaveLength(21)
+    expect(first.terminalP05).toBeLessThan(first.terminalP95!)
+  })
+  it('selects parameters on training folds and reports held-out periods', () => {
+    const points = Array.from({ length: 180 }, (_, index) => ({ datetime: new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10), close: 100 + index * 0.2 + Math.sin(index / 5) * 4 }))
+    const folds = walkForwardValidation(points, { strategy: 'sma-crossover', fastWindow: 5, slowWindow: 20, initialCapital: 100000, commissionBps: 5, slippageBps: 2, allocationPct: 100, rsiOversold: 30, rsiOverbought: 70 }, { trainBars: 80, testBars: 30, candidates: [{ fastWindow: 5, slowWindow: 20 }, { fastWindow: 8, slowWindow: 30 }] })
+    expect(folds).toHaveLength(4)
+    expect(folds[0].testStart).toBe(points[80].datetime)
+    expect(folds.every(fold => fold.outOfSampleReturn != null)).toBe(true)
   })
 })
