@@ -9,7 +9,7 @@ import { AdvancedAnalyticsView } from '@/components/advanced-analytics-view'
 import { DataQualityView } from '@/components/data-quality-view'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { authClient } from '@/lib/auth-client'
-import { annualizedVolatility, BacktestConfig, BacktestResult, dailyReturns, DEFAULT_BACKTEST_CONFIG, historicalCVaR, historicalVaR, maxDrawdown, periodReturn, portfolioShareValue, relativeStrengthIndex, simpleMovingAverage, runBacktest, sharpeRatio, sortinoRatio } from '@/lib/analytics'
+import { alignedReturns, annualizedVolatility, BacktestConfig, BacktestResult, dailyReturns, DEFAULT_BACKTEST_CONFIG, historicalCVaR, historicalVaR, maxDrawdown, periodReturn, portfolioShareValue, regressionRiskMetrics, relativeStrengthIndex, simpleMovingAverage, runBacktest, sharpeRatio, sortinoRatio } from '@/lib/analytics'
 
 type WorkspaceKey = 'Overview' | 'Research' | 'Strategy Lab' | 'Portfolio Risk' | 'Advanced analytics' | 'Experiments' | 'Watchlist' | 'Data Quality'
 type Instrument = { symbol: string; instrument_name: string; exchange?: string; country?: string; currency?: string; type?: string }
@@ -102,6 +102,8 @@ export function QuantDashboard({ user }: { user: { name: string; email: string }
       const benchmarkMap = new Map((holdingSeries.__benchmark ?? []).map(bar => [bar.datetime, Number(bar.close)] as const).filter(([, close]) => Number.isFinite(close) && close > 0))
       const benchmarkStart = benchmarkMap.get(weighted[0]?.datetime ?? '')
       const benchmark = benchmarkStart ? weighted.flatMap(point => { const close = benchmarkMap.get(point.datetime); return close ? [{ datetime: point.datetime, close: totalValue * close / benchmarkStart }] : [] }) : []
+      const aligned = alignedReturns(weighted, benchmark)
+      const benchmarkMetrics = regressionRiskMetrics(aligned.leftReturns, aligned.rightReturns)
       const holdings = raw.map(item => {
         const shares = Number(item.holding.shares)
         const averageCost = item.holding.averageCost ? Number(item.holding.averageCost) : null
@@ -109,7 +111,7 @@ export function QuantDashboard({ user }: { user: { name: string; email: string }
         return { ...item, shares, averageCost, costBasis, unrealizedPnl: costBasis == null ? null : item.value - costBasis, weight: item.value / totalValue }
       })
       const concentration = holdings.reduce((sum, item) => sum + item.weight ** 2, 0)
-      return { weighted, benchmark, benchmarkReturn: periodReturn(benchmark), totalValue, totalReturn: periodReturn(weighted), annualizedRisk: annualizedVolatility(portfolioReturns), sharpe: sharpeRatio(portfolioReturns), maxDrawdown: maxDrawdown(weighted), var95: historicalVaR(portfolioReturns), cvar95: historicalCVaR(portfolioReturns), holdings, unrealizedPnl: holdings.some(item => item.unrealizedPnl != null) ? holdings.reduce((sum, item) => sum + (item.unrealizedPnl ?? 0), 0) : null, concentration, effectiveHoldings: concentration > 0 ? 1 / concentration : null }
+      return { weighted, benchmark, benchmarkReturn: periodReturn(benchmark), benchmarkBeta: benchmarkMetrics.beta, benchmarkAlpha: benchmarkMetrics.alpha, alignedSampleCount: aligned.dates.length, totalValue, totalReturn: periodReturn(weighted), annualizedRisk: annualizedVolatility(portfolioReturns), sharpe: sharpeRatio(portfolioReturns), maxDrawdown: maxDrawdown(weighted), var95: historicalVaR(portfolioReturns), cvar95: historicalCVaR(portfolioReturns), holdings, unrealizedPnl: holdings.some(item => item.unrealizedPnl != null) ? holdings.reduce((sum, item) => sum + (item.unrealizedPnl ?? 0), 0) : null, concentration, effectiveHoldings: concentration > 0 ? 1 / concentration : null }
 
   }, [activeHoldings, holdingSeries])
   const marketReady = Boolean(marketStatus?.configured)
