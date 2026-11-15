@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { annualizedVolatility, backtestSmaCrossover, compoundAnnualGrowthRate, dailyReturns, historicalCVaR, historicalVaR, maxDrawdown, monteCarloBootstrap, periodReturn, regressionRiskMetrics, relativeStrengthIndex, sharpeRatio, sortinoRatio, walkForwardValidation } from './analytics'
+import { annualizedVolatility, backtestSmaCrossover, compoundAnnualGrowthRate, dailyReturns, historicalCVaR, portfolioShareValue, historicalVaR, maxDrawdown, monteCarloBootstrap, periodReturn, regressionRiskMetrics, relativeStrengthIndex, sharpeRatio, sortinoRatio, walkForwardValidation } from './analytics'
 
 describe('analytics calculations', () => {
   const prices = [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }, { datetime: '2026-01-03', close: 99 }]
@@ -9,6 +9,14 @@ describe('analytics calculations', () => {
     expect(periodReturn(prices)).toBeCloseTo(-0.01)
   })
   it('calculates drawdown from the running peak', () => expect(maxDrawdown(prices)).toBeCloseTo(-0.1))
+  it('values fixed share holdings through time instead of reweighting to today', () => {
+    const values = portfolioShareValue([
+      { points: [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }], shares: 2 },
+      { points: [{ datetime: '2026-01-01', close: 50 }, { datetime: '2026-01-02', close: 25 }], shares: 4 },
+    ])
+    expect(values.map(point => point.close)).toEqual([400, 320])
+    expect(portfolioShareValue([{ points: prices, shares: 0 }])).toEqual([])
+  })
   it('returns null for insufficient volatility samples', () => expect(annualizedVolatility([0.01])).toBeNull())
   it('keeps risk metrics finite for valid samples', () => {
     const returns = dailyReturns(prices)
