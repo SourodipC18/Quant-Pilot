@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { annualizedVolatility, backtestSmaCrossover, compoundAnnualGrowthRate, dailyReturns, historicalCVaR, portfolioShareValue, historicalVaR, maxDrawdown, monteCarloBootstrap, periodReturn, regressionRiskMetrics, relativeStrengthIndex, sharpeRatio, sortinoRatio, walkForwardValidation } from './analytics'
+import { annualizedVolatility, backtestSmaCrossover, compoundAnnualGrowthRate, dailyReturns, DEFAULT_BACKTEST_CONFIG, historicalCVaR, portfolioShareValue, historicalVaR, maxDrawdown, monteCarloBootstrap, periodReturn, regressionRiskMetrics, relativeStrengthIndex, runBacktest, sharpeRatio, sortinoRatio, walkForwardValidation } from './analytics'
 
 describe('analytics calculations', () => {
   const prices = [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }, { datetime: '2026-01-03', close: 99 }]
@@ -36,6 +36,16 @@ describe('analytics calculations', () => {
     expect(result.totalReturn).toBeTypeOf('number')
     expect(result.trades.length).toBeGreaterThan(0)
     expect(result.trades[0].costs).toBeGreaterThan(0)
+  })
+  it('rejects non-finite allocation and invalid RSI thresholds', () => {
+    const points = Array.from({ length: 40 }, (_, index) => ({ datetime: `2026-01-${String(index + 1).padStart(2, '0')}`, close: 100 + index }))
+    expect(runBacktest(points, { ...DEFAULT_BACKTEST_CONFIG, fastWindow: 3, slowWindow: 5, allocationPct: Number.NaN }).equity).toEqual([])
+    expect(runBacktest(points, { ...DEFAULT_BACKTEST_CONFIG, strategy: 'rsi-reversal', fastWindow: 3, slowWindow: 5, rsiOversold: 80, rsiOverbought: 20 }).equity).toEqual([])
+  })
+  it('falls back to a valid close when the next daily open is invalid', () => {
+    const points = Array.from({ length: 40 }, (_, index) => ({ datetime: `2026-01-${String(index + 1).padStart(2, '0')}`, close: 100 + index, open: index === 6 ? Number.NaN : undefined }))
+    const result = runBacktest(points, { ...DEFAULT_BACKTEST_CONFIG, fastWindow: 2, slowWindow: 5, commissionBps: 0, slippageBps: 0 })
+    expect(result.equity.every(point => Number.isFinite(point.value))).toBe(true)
   })
   it('estimates factor risk from aligned strategy and benchmark returns', () => {
     const metrics = regressionRiskMetrics([0.02, -0.01, 0.04, 0.01], [0.01, -0.005, 0.02, 0.005])

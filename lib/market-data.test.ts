@@ -6,7 +6,7 @@ const bar = (datetime: string, open = '100', high = '105', low = '95', close = '
 describe('market data normalization and validation', () => {
   it('normalizes symbols and intraday timestamps to UTC while retaining raw OHLCV values', () => {
     expect(normalizeSymbol('  aapl ')).toBe('AAPL')
-    expect(normalizeHistory({ values: [{ datetime: '2026-04-02 09:30:00', open: 1, high: 2, low: 1, close: 2, volume: 10 }] }, '5min')[0]).toEqual({ datetime: new Date('2026-04-02 09:30:00').toISOString(), open: '1', high: '2', low: '1', close: '2', volume: '10' })
+    expect(normalizeHistory({ values: [{ datetime: '2026-04-02 09:30:00', open: 1, high: 2, low: 1, close: 2, volume: 10 }] }, '5min')[0]).toEqual({ datetime: '2026-04-02T09:30:00.000Z', open: '1', high: '2', low: '1', close: '2', volume: '10' })
     expect(normalizeHistory({ values: [{ datetime: '2026-04-02', open: '1', high: '2', low: '1', close: '2' }] }, '1day')[0].datetime).toBe('2026-04-02')
   })
 

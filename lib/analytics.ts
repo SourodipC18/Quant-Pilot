@@ -32,7 +32,16 @@ function emptyBacktest(): BacktestResult { return { equity: [], trades: [], tota
 export function runBacktest(input: PricePoint[], config: BacktestConfig): BacktestResult {
   const bars = cleanPrices(input)
   const { strategy, fastWindow, slowWindow, initialCapital, commissionBps, slippageBps, marketImpactBps = 0, allocationPct, rsiOversold, rsiOverbought } = config
-  if (bars.length < Math.max(3, slowWindow + 2) || !Number.isInteger(fastWindow) || !Number.isInteger(slowWindow) || fastWindow < 2 || fastWindow >= slowWindow || !Number.isFinite(initialCapital) || initialCapital <= 0 || !Number.isFinite(commissionBps) || commissionBps < 0 || !Number.isFinite(slippageBps) || slippageBps < 0 || !Number.isFinite(marketImpactBps) || marketImpactBps < 0 || allocationPct <= 0 || allocationPct > 100) return emptyBacktest()
+  if (!['sma-crossover', 'ema-crossover', 'rsi-reversal'].includes(strategy) ||
+    bars.length < Math.max(3, slowWindow + 2) ||
+    !Number.isInteger(fastWindow) || !Number.isInteger(slowWindow) || fastWindow < 2 || fastWindow >= slowWindow ||
+    !Number.isFinite(initialCapital) || initialCapital <= 0 ||
+    !Number.isFinite(commissionBps) || commissionBps < 0 ||
+    !Number.isFinite(slippageBps) || slippageBps < 0 ||
+    !Number.isFinite(marketImpactBps) || marketImpactBps < 0 ||
+    !Number.isFinite(allocationPct) || allocationPct <= 0 || allocationPct > 100 ||
+    !Number.isFinite(rsiOversold) || !Number.isFinite(rsiOverbought) ||
+    rsiOversold < 0 || rsiOverbought > 100 || rsiOversold >= rsiOverbought) return emptyBacktest()
   const closes = bars.map(bar => bar.close)
   const fast = strategy === 'ema-crossover' ? exponentialMovingAverage(closes, fastWindow) : simpleMovingAverage(closes, fastWindow)
   const slow = strategy === 'ema-crossover' ? exponentialMovingAverage(closes, slowWindow) : simpleMovingAverage(closes, slowWindow)
@@ -49,7 +58,11 @@ export function runBacktest(input: PricePoint[], config: BacktestConfig): Backte
     const exit = strategy === 'rsi-reversal'
       ? rsi[previousIndex] != null && rsi[signalIndex] != null && rsi[previousIndex]! < rsiOverbought && rsi[signalIndex]! >= rsiOverbought
       : fast[previousIndex] != null && slow[previousIndex] != null && fast[signalIndex] != null && slow[signalIndex] != null && fast[previousIndex]! >= slow[previousIndex]! && fast[signalIndex]! < slow[signalIndex]!
-    const executionPrice = index === bars.length - 1 && shares > 0 && !exit ? bars[index].close : bars[index].open ?? bars[index].close
+    // Daily bars do not reveal intraday order. Use the next bar's open when it
+    // is a valid positive price; otherwise fall back to that bar's close.
+    const barOpen = bars[index].open
+    const nextBarPrice = Number.isFinite(barOpen) && barOpen! > 0 ? barOpen! : bars[index].close
+    const executionPrice = index === bars.length - 1 && shares > 0 && !exit ? bars[index].close : nextBarPrice
     if (shares === 0 && enter) {
       const notional = cash * allocationPct / 100
       shares = notional / (executionPrice * (1 + friction))
