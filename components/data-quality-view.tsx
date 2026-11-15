@@ -9,7 +9,20 @@ type MarketBar = { datetime: string; open: string; high: string; low: string; cl
 type MarketQuality = { status: 'available' | 'warning' | 'unavailable'; observations: number; missingObservations: number | null; missingPercentage: number | null; duplicates: number; invalidOhlc: number; abnormalMoves: number; missingVolume: number; latestObservation: string | null; stale: boolean | null; coverageStart: string | null; coverageEnd: string | null; warnings: string[] }
 type QualityResponse = { values?: MarketBar[]; meta?: Record<string, unknown>; source?: string; lastSyncedAt?: string; interval?: MarketInterval; adjustment?: PriceAdjustment; quality?: MarketQuality; error?: string }
 const intervals: MarketInterval[] = ['1min', '5min', '15min', '30min', '45min', '1h', '2h', '4h', '1day', '1week', '1month']
-const fetcher = async (url: string): Promise<QualityResponse> => { const response = await fetch(url); const data = await response.json(); if (!response.ok) throw new Error(data.error ?? 'Unable to retrieve market history.'); return data }
+const fetcher = async (url: string): Promise<QualityResponse> => {
+  let response: Response
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(15_000) })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') throw new Error('The market-data request timed out. Please try again.')
+    if (error instanceof TypeError) throw new Error('The market-data service could not be reached. Check your connection and try again.')
+    throw error
+  }
+  const data = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(data && typeof data.error === 'string' ? data.error : `Unable to retrieve market history (${response.status}).`)
+  if (data == null) throw new Error('The market-data service returned an unreadable response. Please try again.')
+  return data as QualityResponse
+}
 const displayDate = (value?: string | null) => value ? new Date(value.length === 10 ? `${value}T00:00:00Z` : value).toLocaleString() : '—'
 const formatNumber = (value?: number | null) => value == null ? '—' : value.toLocaleString()
 

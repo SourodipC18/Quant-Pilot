@@ -21,7 +21,20 @@ type SavedStrategyItem = SavedItem & { config: BacktestConfig; description: stri
 type UserWorkspace = { watchlist: { id: string; symbol: string; companyName: string }[]; portfolios: { id: string; name: string; benchmark: string }[]; holdings: { id: string; portfolioId: string; symbol: string; shares: string; averageCost: string | null }[]; strategies: SavedStrategyItem[]; backtests: BacktestItem[]; experiments: (SavedItem & { symbol: string; config?: BacktestConfig; results?: { fastWindow: number; slowWindow: number; totalReturn: number | null; sharpe: number | null; maxDrawdown: number | null; trades: number }[] })[] }
 type MarketStatus = { configured: boolean; coverage?: string }
 type MarketResponse = { data?: Instrument[]; values?: Bar[]; close?: string; change?: string; percent_change?: string; datetime?: string; error?: string }
-const fetcher = async <T,>(url: string): Promise<T> => { const response = await fetch(url); const data = await response.json(); if (!response.ok) throw new Error(data.error ?? 'Request failed'); return data }
+const fetcher = async <T,>(url: string): Promise<T> => {
+  let response: Response
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(15_000) })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') throw new Error('The request timed out. Please try again.')
+    if (error instanceof TypeError) throw new Error('The server could not be reached. Check your connection and try again.')
+    throw error
+  }
+  const data = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(data && typeof data.error === 'string' ? data.error : `Request failed (${response.status}).`)
+  if (data == null) throw new Error('The server returned an unreadable response. Please try again.')
+  return data as T
+}
 const popular: Instrument[] = [{ symbol: 'AAPL', instrument_name: 'Apple Inc.', exchange: 'NASDAQ', currency: 'USD' }, { symbol: 'MSFT', instrument_name: 'Microsoft Corporation', exchange: 'NASDAQ', currency: 'USD' }, { symbol: 'NVDA', instrument_name: 'NVIDIA Corporation', exchange: 'NASDAQ', currency: 'USD' }, { symbol: 'SPY', instrument_name: 'SPDR S&P 500 ETF Trust', exchange: 'NYSE Arca', currency: 'USD' }]
 const nav: { key: WorkspaceKey; icon: typeof LayoutDashboard; label: string }[] = [{ key: 'Overview', icon: LayoutDashboard, label: 'Overview' }, { key: 'Research', icon: Search, label: 'Research workbench' }, { key: 'Strategy Lab', icon: FlaskConical, label: 'Strategy lab' }, { key: 'Portfolio Risk', icon: Wallet, label: 'Portfolio risk' }, { key: 'Advanced analytics', icon: SlidersHorizontal, label: 'Advanced analytics' }, { key: 'Experiments', icon: Activity, label: 'Experiments' }, { key: 'Watchlist', icon: Star, label: 'Watchlist' }, { key: 'Data Quality', icon: Database, label: 'Data quality' }]
 const money = (value: number | null | undefined, digits = 2) => value == null || !Number.isFinite(value) ? '—' : value.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: digits })
