@@ -78,6 +78,13 @@ export function runBacktest(input: PricePoint[], config: BacktestConfig): Backte
 }
 export function backtestSmaCrossover(points: PricePoint[], fastWindow = 20, slowWindow = 50, initialCapital = 100000, commissionBps = 5, slippageBps = 2): BacktestResult { return runBacktest(points, { ...DEFAULT_BACKTEST_CONFIG, fastWindow, slowWindow, initialCapital, commissionBps, slippageBps }) }
 export function portfolioWeightedReturn(series: { points: PricePoint[]; weight: number }[]): PricePoint[] { if (!series.length || series.some(item => item.weight < 0) || Math.abs(series.reduce((sum, item) => sum + item.weight, 0) - 1) > .001) return []; const maps = series.map(({ points }) => new Map(cleanPrices(points).map(point => [point.datetime, point.close]))); const dates = [...maps[0].keys()].filter(date => maps.every(map => map.has(date))).sort(); if (!dates.length) return []; const bases = maps.map(map => map.get(dates[0])!); return dates.map(datetime => ({ datetime, close: series.reduce((sum, item, index) => sum + item.weight * maps[index].get(datetime)! / bases[index], 0) })) }
+
+export function portfolioShareValue(series: { points: PricePoint[]; shares: number }[]): PricePoint[] {
+  if (!series.length || series.some(item => !Number.isFinite(item.shares) || item.shares <= 0)) return []
+  const maps = series.map(({ points }) => new Map(cleanPrices(points).map(point => [point.datetime, point.close])))
+  const dates = [...maps[0].keys()].filter(date => maps.every(map => map.has(date))).sort()
+  return dates.map(datetime => ({ datetime, close: series.reduce((total, item, index) => total + item.shares * maps[index].get(datetime)!, 0) }))
+}
 export function safeNumber(value: number | null): number | null { return value != null && Number.isFinite(value) ? value : null }
 export const DEFAULT_ANNUAL_RISK_FREE_RATE = 0
 export const TRADING_PERIODS_PER_YEAR = 252
@@ -119,8 +126,8 @@ export function walkForwardValidation(input: PricePoint[], config: BacktestConfi
     const testEnd = Math.min(bars.length, testStart + testBars)
     const valid = candidates.filter(candidate => candidate.fastWindow >= 2 && candidate.fastWindow < candidate.slowWindow && train.length >= candidate.slowWindow + 2)
     if (!valid.length || testEnd <= testStart) continue
-    const selected = valid.map(candidate => ({ ...candidate, result: runBacktest(train, { ...config, strategy: 'sma-crossover', ...candidate }) })).sort((a, b) => (b.result.sharpe ?? -Infinity) - (a.result.sharpe ?? -Infinity))[0]
-    const fullResult = runBacktest(bars.slice(0, testEnd), { ...config, strategy: 'sma-crossover', fastWindow: selected.fastWindow, slowWindow: selected.slowWindow })
+    const selected = valid.map(candidate => ({ ...candidate, result: runBacktest(train, { ...config, ...candidate }) })).sort((a, b) => (b.result.sharpe ?? -Infinity) - (a.result.sharpe ?? -Infinity))[0]
+    const fullResult = runBacktest(bars.slice(0, testEnd), { ...config, fastWindow: selected.fastWindow, slowWindow: selected.slowWindow })
     const startEquity = fullResult.equity[testStart - 2]?.value
     const endEquity = fullResult.equity.at(-1)?.value
     folds.push({ trainStart: train[0].datetime, trainEnd: train.at(-1)!.datetime, testStart: bars[testStart].datetime, testEnd: bars[testEnd - 1].datetime, fastWindow: selected.fastWindow, slowWindow: selected.slowWindow, trainingSharpe: selected.result.sharpe, outOfSampleReturn: startEquity && endEquity != null ? endEquity / startEquity - 1 : null })

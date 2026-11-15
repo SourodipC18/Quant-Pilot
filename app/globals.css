@@ -457,6 +457,17 @@ h2 { margin: 4px 0 0; font-size: 13px; letter-spacing: -.015em; font-weight: 650
 .auth-note { display: flex; align-items: center; justify-content: center; gap: 6px; padding-top: 21px; border-top: 1px solid #30323b; margin-top: 22px; color: #858792; font-size: 9px; }
 .auth-error { padding: 9px 10px; border: 1px solid #5a3738; border-radius: 6px; background: #2c1c1e; color: #f09295; font-size: 10px; }
 .spin { animation: spin .8s linear infinite; }
+.technical-charts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.technical-chart { height: 210px; }
+.volume-chart { height: 130px; margin-top: 10px; }
+.portfolio-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.chart-legend { display: flex; gap: 18px; padding: 4px 2px 0; color: var(--muted); font-size: 9px; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend i { width: 13px; height: 2px; border-radius: 2px; }
+.portfolio-legend { background: #60c598; }
+.benchmark-legend { background: var(--accent-blue); }
+@media (max-width: 900px) { .technical-charts-grid { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .technical-chart { height: 210px !important; } .technical-charts-grid .volume-chart { height: 140px !important; } .portfolio-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @keyframes spin { to { transform: rotate(360deg); } }
 :where(button, a, input, select):focus-visible { outline: 2px solid #8992ff; outline-offset: 2px; }
 @media (max-width: 1120px) { .secondary-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
