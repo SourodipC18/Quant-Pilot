@@ -42,6 +42,36 @@ describe('analytics calculations', () => {
     expect(runBacktest(points, { ...DEFAULT_BACKTEST_CONFIG, fastWindow: 3, slowWindow: 5, allocationPct: Number.NaN }).equity).toEqual([])
     expect(runBacktest(points, { ...DEFAULT_BACKTEST_CONFIG, strategy: 'rsi-reversal', fastWindow: 3, slowWindow: 5, rsiOversold: 80, rsiOverbought: 20 }).equity).toEqual([])
   })
+  it('executes crossover signals on the next bar open and liquidates on the final close', () => {
+    const points = [
+      { datetime: '2026-01-01', close: 3 },
+      { datetime: '2026-01-02', close: 2 },
+      { datetime: '2026-01-03', close: 1 },
+      { datetime: '2026-01-04', close: 2 },
+      { datetime: '2026-01-05', close: 3 },
+      { datetime: '2026-01-06', open: 4.5, close: 4 },
+      { datetime: '2026-01-07', close: 5 },
+    ]
+    const result = runBacktest(points, { ...DEFAULT_BACKTEST_CONFIG, fastWindow: 2, slowWindow: 3, commissionBps: 0, slippageBps: 0, marketImpactBps: 0 })
+    expect(result.trades).toHaveLength(1)
+    expect(result.trades[0]).toMatchObject({ entryDate: '2026-01-06', exitDate: '2026-01-07', entryPrice: 4.5, exitPrice: 5, barsHeld: 1 })
+    expect(result.trades[0].pnl).toBeCloseTo(100000 / 4.5 * 0.5)
+    expect(result.equity.at(-1)?.datetime).toBe('2026-01-07')
+    expect(result.equity.at(-1)?.value).toBeCloseTo(100000 * 5 / 4.5)
+  })
+  it('includes commission, slippage, and market impact in cash and trade results', () => {
+    const points = [
+      { datetime: '2026-01-01', close: 3 }, { datetime: '2026-01-02', close: 2 },
+      { datetime: '2026-01-03', close: 1 }, { datetime: '2026-01-04', close: 2 },
+      { datetime: '2026-01-05', close: 3 }, { datetime: '2026-01-06', open: 4, close: 4 },
+      { datetime: '2026-01-07', close: 5 },
+    ]
+    const result = runBacktest(points, { ...DEFAULT_BACKTEST_CONFIG, fastWindow: 2, slowWindow: 3, commissionBps: 100, slippageBps: 100, marketImpactBps: 100 })
+    expect(result.trades).toHaveLength(1)
+    expect(result.trades[0].entryPrice).toBe(4)
+    expect(result.trades[0].costs).toBeGreaterThan(0)
+    expect(result.equity.at(-1)!.value).toBeLessThan(125000)
+  })
   it('falls back to a valid close when the next daily open is invalid', () => {
     const points = Array.from({ length: 40 }, (_, index) => ({ datetime: `2026-01-${String(index + 1).padStart(2, '0')}`, close: 100 + index, open: index === 6 ? Number.NaN : undefined }))
     const result = runBacktest(points, { ...DEFAULT_BACKTEST_CONFIG, fastWindow: 2, slowWindow: 5, commissionBps: 0, slippageBps: 0 })
