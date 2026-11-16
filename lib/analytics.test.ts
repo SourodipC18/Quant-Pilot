@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { annualizedVolatility, backtestSmaCrossover, compoundAnnualGrowthRate, dailyReturns, DEFAULT_BACKTEST_CONFIG, historicalCVaR, portfolioShareValue, historicalVaR, maxDrawdown, monteCarloBootstrap, periodReturn, regressionRiskMetrics, relativeStrengthIndex, runBacktest, sharpeRatio, sortinoRatio, walkForwardValidation } from './analytics'
+import { annualizedVolatility, backtestSmaCrossover, benchmarkComparison, compoundAnnualGrowthRate, dailyReturns, DEFAULT_BACKTEST_CONFIG, historicalCVaR, portfolioRisk, portfolioShareValue, historicalVaR, maxDrawdown, monteCarloBootstrap, periodReturn, regressionRiskMetrics, relativeStrengthIndex, runBacktest, sharpeRatio, sortinoRatio, walkForwardValidation } from './analytics'
 
 describe('analytics calculations', () => {
   const prices = [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }, { datetime: '2026-01-03', close: 99 }]
@@ -76,6 +76,28 @@ describe('analytics calculations', () => {
     const points = Array.from({ length: 40 }, (_, index) => ({ datetime: `2026-01-${String(index + 1).padStart(2, '0')}`, close: 100 + index, open: index === 6 ? Number.NaN : undefined }))
     const result = runBacktest(points, { ...DEFAULT_BACKTEST_CONFIG, fastWindow: 2, slowWindow: 5, commissionBps: 0, slippageBps: 0 })
     expect(result.equity.every(point => Number.isFinite(point.value))).toBe(true)
+  })
+  it('compares aligned asset and benchmark returns without using raw price correlation', () => {
+    const asset = [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }, { datetime: '2026-01-04', close: 121 }]
+    const benchmark = [{ datetime: '2026-01-01', close: 50 }, { datetime: '2026-01-02', close: 55 }, { datetime: '2026-01-03', close: 56 }, { datetime: '2026-01-04', close: 60.5 }]
+    const comparison = benchmarkComparison(asset, benchmark)
+    expect(comparison.cumulativeReturn).toBeCloseTo(0.21)
+    expect(comparison.excessReturn).toBeCloseTo(0.21 - 0.21)
+    expect(comparison.sampleCount).toBe(2)
+    expect(comparison.dates).toEqual(['2026-01-02', '2026-01-04'])
+  })
+  it('uses aligned weighted portfolio returns for portfolio risk', () => {
+    const risk = portfolioRisk([
+      { weight: 0.6, points: [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }, { datetime: '2026-01-03', close: 99 }] },
+      { weight: 0.4, points: [{ datetime: '2026-01-01', close: 50 }, { datetime: '2026-01-02', close: 55 }, { datetime: '2026-01-03', close: 55 }] },
+    ])
+    expect(risk?.sampleCount).toBe(2)
+    expect(risk?.portfolio.at(-1)?.close).toBeCloseTo(1.034)
+    expect(risk?.annualizedVolatility).toBeTypeOf('number')
+  })
+  it('rejects invalid portfolio weights and insufficient aligned history', () => {
+    expect(portfolioRisk([{ weight: 0.5, points: prices }, { weight: 0.4, points: prices }])).toBeNull()
+    expect(benchmarkComparison(prices, [{ datetime: '2026-01-01', close: 50 }]).sampleCount).toBe(0)
   })
   it('estimates factor risk from aligned strategy and benchmark returns', () => {
     const metrics = regressionRiskMetrics([0.02, -0.01, 0.04, 0.01], [0.01, -0.005, 0.02, 0.005])

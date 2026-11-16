@@ -92,6 +92,22 @@ export function runBacktest(input: PricePoint[], config: BacktestConfig): Backte
 export function backtestSmaCrossover(points: PricePoint[], fastWindow = 20, slowWindow = 50, initialCapital = 100000, commissionBps = 5, slippageBps = 2): BacktestResult { return runBacktest(points, { ...DEFAULT_BACKTEST_CONFIG, fastWindow, slowWindow, initialCapital, commissionBps, slippageBps }) }
 export function portfolioWeightedReturn(series: { points: PricePoint[]; weight: number }[]): PricePoint[] { if (!series.length || series.some(item => item.weight < 0) || Math.abs(series.reduce((sum, item) => sum + item.weight, 0) - 1) > .001) return []; const maps = series.map(({ points }) => new Map(cleanPrices(points).map(point => [point.datetime, point.close]))); const dates = [...maps[0].keys()].filter(date => maps.every(map => map.has(date))).sort(); if (!dates.length) return []; const bases = maps.map(map => map.get(dates[0])!); return dates.map(datetime => ({ datetime, close: series.reduce((sum, item, index) => sum + item.weight * maps[index].get(datetime)! / bases[index], 0) })) }
 
+export type BenchmarkComparison = { cumulativeReturn: number | null; excessReturn: number | null; beta: number | null; alpha: number | null; sampleCount: number; dates: string[] }
+export function benchmarkComparison(asset: PricePoint[], benchmark: PricePoint[], annualRiskFreeRate = 0, periods = TRADING_PERIODS_PER_YEAR): BenchmarkComparison {
+  const aligned = alignedReturns(asset, benchmark)
+  const metrics = regressionRiskMetrics(aligned.leftReturns, aligned.rightReturns, annualRiskFreeRate, periods)
+  const assetReturn = periodReturn(asset), benchmarkReturn = periodReturn(benchmark)
+  return { cumulativeReturn: assetReturn, excessReturn: assetReturn != null && benchmarkReturn != null ? assetReturn - benchmarkReturn : null, beta: metrics.beta, alpha: metrics.alpha, sampleCount: aligned.dates.length, dates: aligned.dates }
+}
+
+export type PortfolioRisk = { portfolio: PricePoint[]; returns: number[]; annualizedVolatility: number | null; sharpe: number | null; maxDrawdown: number | null; sampleCount: number }
+export function portfolioRisk(series: { points: PricePoint[]; weight: number }[], annualRiskFreeRate = DEFAULT_ANNUAL_RISK_FREE_RATE, periods = TRADING_PERIODS_PER_YEAR): PortfolioRisk | null {
+  const portfolio = portfolioWeightedReturn(series)
+  if (portfolio.length < 2) return null
+  const returns = dailyReturns(portfolio)
+  return { portfolio, returns, annualizedVolatility: annualizedVolatility(returns, periods), sharpe: sharpeRatio(returns, annualRiskFreeRate, periods), maxDrawdown: maxDrawdown(portfolio), sampleCount: returns.length }
+}
+
 export function alignedReturns(left: PricePoint[], right: PricePoint[]) {
   const leftMap = new Map(cleanPrices(left).map(point => [point.datetime, point.close]))
   const rightMap = new Map(cleanPrices(right).map(point => [point.datetime, point.close]))
