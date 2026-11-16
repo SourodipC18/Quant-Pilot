@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { annualizedVolatility, backtestSmaCrossover, benchmarkComparison, bollingerBands, compoundAnnualGrowthRate, dailyReturns, DEFAULT_BACKTEST_CONFIG, detectCandlestickPatterns, exponentialMovingAverage, historicalCVaR, macdSeries, portfolioRisk, portfolioShareValue, historicalVaR, maxDrawdown, monteCarloBootstrap, periodReturn, regressionRiskMetrics, relativeStrengthIndex, runBacktest, sharpeRatio, simpleMovingAverage, sortinoRatio, walkForwardValidation } from './analytics'
+import { annualizedVolatility, backtestSmaCrossover, benchmarkComparison, bollingerBands, compoundAnnualGrowthRate, dailyReturns, DEFAULT_BACKTEST_CONFIG, detectCandlestickPatterns, exponentialMovingAverage, historicalCVaR, macdSeries, optimizePortfolio, portfolioAttribution, portfolioRisk, portfolioShareValue, historicalVaR, maxDrawdown, monteCarloBootstrap, periodReturn, rebalanceProposal, regressionRiskMetrics, relativeStrengthIndex, runBacktest, sharpeRatio, simpleMovingAverage, sortinoRatio, walkForwardValidation } from './analytics'
 
 describe('analytics calculations', () => {
   const prices = [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }, { datetime: '2026-01-03', close: 99 }]
@@ -110,6 +110,17 @@ describe('analytics calculations', () => {
     expect(risk?.sampleCount).toBe(2)
     expect(risk?.portfolio.at(-1)?.close).toBeCloseTo(1.034)
     expect(risk?.annualizedVolatility).toBeTypeOf('number')
+  })
+  it('optimizes aligned assets with bounded weights and reports risk parity', () => {
+    const result = optimizePortfolio([
+      { symbol: 'AAA', points: [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 101 }, { datetime: '2026-01-03', close: 102 }, { datetime: '2026-01-04', close: 103 }] },
+      { symbol: 'BBB', points: [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 99 }, { datetime: '2026-01-03', close: 101 }, { datetime: '2026-01-04', close: 100 }] },
+    ], { maxWeight: 0.8, step: 0.1 })
+    expect(result?.minimumVariance).not.toBeNull()
+    expect(result?.frontier.length).toBeGreaterThan(0)
+    expect(result?.minimumVariance?.weights.reduce((sum, value) => sum + value, 0)).toBeCloseTo(1)
+    expect(portfolioAttribution([0.6, 0.4], [[0.01, 0.02], [0, 0.01]])[0].contribution).toBeCloseTo(0.6 * 0.015 * 252)
+    expect(rebalanceProposal([0.8, 0.2], [0.6, 0.4], 0.05).map(item => item.action)).toEqual(['decrease', 'increase'])
   })
   it('rejects invalid portfolio weights and insufficient aligned history', () => {
     expect(portfolioRisk([{ weight: 0.5, points: prices }, { weight: 0.4, points: prices }])).toBeNull()
