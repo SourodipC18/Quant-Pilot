@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { annualizedVolatility, backtestSmaCrossover, benchmarkComparison, compoundAnnualGrowthRate, dailyReturns, DEFAULT_BACKTEST_CONFIG, historicalCVaR, portfolioRisk, portfolioShareValue, historicalVaR, maxDrawdown, monteCarloBootstrap, periodReturn, regressionRiskMetrics, relativeStrengthIndex, runBacktest, sharpeRatio, sortinoRatio, walkForwardValidation } from './analytics'
+import { annualizedVolatility, backtestSmaCrossover, benchmarkComparison, bollingerBands, compoundAnnualGrowthRate, dailyReturns, DEFAULT_BACKTEST_CONFIG, detectCandlestickPatterns, exponentialMovingAverage, historicalCVaR, macdSeries, portfolioRisk, portfolioShareValue, historicalVaR, maxDrawdown, monteCarloBootstrap, periodReturn, regressionRiskMetrics, relativeStrengthIndex, runBacktest, sharpeRatio, simpleMovingAverage, sortinoRatio, walkForwardValidation } from './analytics'
 
 describe('analytics calculations', () => {
   const prices = [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }, { datetime: '2026-01-03', close: 99 }]
@@ -9,6 +9,22 @@ describe('analytics calculations', () => {
     expect(periodReturn(prices)).toBeCloseTo(-0.01)
   })
   it('calculates drawdown from the running peak', () => expect(maxDrawdown(prices)).toBeCloseTo(-0.1))
+  it('matches known indicator warm-up and values', () => {
+    expect(simpleMovingAverage([1, 2, 3, 4], 2)).toEqual([null, 1.5, 2.5, 3.5])
+    expect(exponentialMovingAverage([1, 2, 3, 4], 2)).toEqual([null, 1.5, 2.5, 3.5])
+    expect(bollingerBands([1, 2, 3], 3, 2)[2]?.middle).toBe(2)
+    expect(macdSeries(Array.from({ length: 40 }, (_, index) => 100 + index))[0].macd).toBeNull()
+    expect(macdSeries(Array.from({ length: 40 }, (_, index) => 100 + index)).at(-1)?.histogram).toBeTypeOf('number')
+  })
+  it('only reports candlestick patterns when complete OHLC fields exist', () => {
+    const patterns = detectCandlestickPatterns([
+      { datetime: '2026-01-01', open: 10, high: 11, low: 9, close: 9.5 },
+      { datetime: '2026-01-02', open: 9, high: 12, low: 8, close: 11 },
+      { datetime: '2026-01-03', close: 12 },
+    ])
+    expect(patterns[1].patterns).toContain('Bullish engulfing')
+    expect(patterns[2].patterns).toEqual([])
+  })
   it('values fixed share holdings through time instead of reweighting to today', () => {
     const values = portfolioShareValue([
       { points: [{ datetime: '2026-01-01', close: 100 }, { datetime: '2026-01-02', close: 110 }], shares: 2 },
