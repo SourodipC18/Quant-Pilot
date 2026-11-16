@@ -157,10 +157,15 @@ export function walkForwardValidation(input: PricePoint[], config: BacktestConfi
     const valid = candidates.filter(candidate => candidate.fastWindow >= 2 && candidate.fastWindow < candidate.slowWindow && train.length >= candidate.slowWindow + 2)
     if (!valid.length || testEnd <= testStart) continue
     const selected = valid.map(candidate => ({ ...candidate, result: runBacktest(train, { ...config, ...candidate }) })).sort((a, b) => (b.result.sharpe ?? -Infinity) - (a.result.sharpe ?? -Infinity))[0]
-    const fullResult = runBacktest(bars.slice(0, testEnd), { ...config, fastWindow: selected.fastWindow, slowWindow: selected.slowWindow })
-    const startEquity = fullResult.equity[testStart - 2]?.value
-    const endEquity = fullResult.equity.at(-1)?.value
-    folds.push({ trainStart: train[0].datetime, trainEnd: train.at(-1)!.datetime, testStart: bars[testStart].datetime, testEnd: bars[testEnd - 1].datetime, fastWindow: selected.fastWindow, slowWindow: selected.slowWindow, trainingSharpe: selected.result.sharpe, outOfSampleReturn: startEquity && endEquity != null ? endEquity / startEquity - 1 : null })
+    // Re-run the selected strategy on the chronological prefix ending at the fold's
+    // test boundary. This preserves indicator warm-up and the position state carried
+    // from training, while measuring only the held-out interval.
+    const testResult = runBacktest(bars.slice(0, testEnd), { ...config, fastWindow: selected.fastWindow, slowWindow: selected.slowWindow })
+    const equityByDate = new Map(testResult.equity.map(point => [point.datetime, point.value]))
+    const startEquity = equityByDate.get(bars[testStart - 1].datetime)
+    const endEquity = equityByDate.get(bars[testEnd - 1].datetime)
+    const outOfSampleReturn = startEquity != null && endEquity != null && startEquity > 0 ? endEquity / startEquity - 1 : null
+    folds.push({ trainStart: train[0].datetime, trainEnd: train.at(-1)!.datetime, testStart: bars[testStart].datetime, testEnd: bars[testEnd - 1].datetime, fastWindow: selected.fastWindow, slowWindow: selected.slowWindow, trainingSharpe: selected.result.sharpe, outOfSampleReturn })
   }
   return folds
 }
