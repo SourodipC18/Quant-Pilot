@@ -4,6 +4,8 @@
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-Ready-3178C6?logo=typescript)
+![Python](https://img.shields.io/badge/Python-Analytics-3776AB?logo=python)
+![R](https://img.shields.io/badge/R-Statistics-276DC3?logo=r)
 ![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-4169E1?logo=postgresql)
 ![Status](https://img.shields.io/badge/Status-Active-success)
 
@@ -179,6 +181,14 @@ QuantPilot is designed as a research and analytical decision-support system, not
 ---
 
 ## Technology Stack
+
+### Research analytics services
+
+The repository includes independent Python and R implementations under `analytics/` for portfolio optimization, covariance analysis, risk parity, return attribution, and review-only rebalance proposals. The Next.js app keeps a deterministic TypeScript mirror for interactive previews, while the Python/R modules provide a clear path for batch research, model validation, and production analytics service deployment.
+
+- **Python:** bounded mean-variance search, minimum variance, maximum Sharpe, risk parity, attribution, and rebalance review.
+- **R:** covariance-based portfolio statistics, efficient-frontier search, risk contributions, attribution, and rebalance review.
+- Both implementations use aligned historical returns and explicit long-only constraints; neither executes trades.
 
 ### Frontend
 - Next.js 16
