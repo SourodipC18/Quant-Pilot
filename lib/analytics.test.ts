@@ -138,7 +138,30 @@ describe('analytics calculations', () => {
     const second = monteCarloBootstrap([-0.02, -0.01, 0.005, 0.01, 0.02], 10000, 20, 250, 7)
     expect(first.fan).toEqual(second.fan)
     expect(first.fan).toHaveLength(21)
+    expect(first.trajectories).toHaveLength(240)
+    expect(first.trajectories[0]).toHaveLength(21)
+    expect(first.trajectories).toEqual(second.trajectories)
     expect(first.terminalP05).toBeLessThan(first.terminalP95!)
+  })
+  it('projects different stocks from price history too short for a strategy backtest', () => {
+    const stockPrices = (moves: number[]) => Array.from({ length: 22 }, (_, index) => ({
+      datetime: new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10),
+      close: moves[index % moves.length],
+    }))
+    const quieterStock = stockPrices([100, 101, 100.5])
+    const volatileStock = stockPrices([100, 109, 95])
+    expect(runBacktest(quieterStock, DEFAULT_BACKTEST_CONFIG).equity).toEqual([])
+    const quietProjection = monteCarloBootstrap(dailyReturns(quieterStock), 100000, 30, 500, 42)
+    const volatileProjection = monteCarloBootstrap(dailyReturns(volatileStock), 100000, 30, 500, 42)
+    const quietBand = quietProjection.fan.at(-1)!
+    const volatileBand = volatileProjection.fan.at(-1)!
+    expect(quietBand.p95 - quietBand.p05).toBeGreaterThan(0)
+    expect(volatileBand.p95 - volatileBand.p05).toBeGreaterThan(quietBand.p95 - quietBand.p05)
+  })
+  it('keeps identical historical returns deterministic without inventing movement', () => {
+    const result = monteCarloBootstrap(Array(22).fill(0), 100000, 20, 100, 42)
+    expect(result.fan.every(({ p05, median, p95 }) => p05 === 100000 && median === p05 && p95 === p05)).toBe(true)
+    expect(result.probabilityOfLoss).toBe(0)
   })
   it('selects parameters on training folds and reports held-out periods', () => {
     const points = Array.from({ length: 180 }, (_, index) => ({ datetime: new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10), close: 100 + index * 0.2 + Math.sin(index / 5) * 4 }))
