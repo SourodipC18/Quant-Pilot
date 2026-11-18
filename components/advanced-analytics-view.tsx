@@ -8,7 +8,7 @@ import { MonteCarloChart } from '@/components/monte-carlo-chart'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { BacktestConfig, BacktestResult, dailyReturns, historicalCVaR, monteCarloBootstrap, PricePoint, regressionRiskMetrics, runBacktest, tradeExpectancy, walkForwardValidation } from '@/lib/analytics'
 
-type AnalyticsTab = 'Risk & benchmark' | 'Costs & trades' | 'Walk-forward' | 'Monte Carlo' | 'Stress lab'
+export type AnalyticsTab = 'Risk & benchmark' | 'Costs & trades' | 'Walk-forward' | 'Monte Carlo' | 'Stress lab'
 type Scenario = { id: number; label: string; shock: number }
 type NumericBar = PricePoint & { high?: number; low?: number; volume?: number }
 
@@ -20,7 +20,7 @@ const chartConfig = {
   cost: { label: 'Estimated cost', color: 'var(--chart-4)' },
 } satisfies ChartConfig
 
-const tabs: { label: AnalyticsTab; icon: typeof Activity; description: string }[] = [
+export const analyticsTabs: { label: AnalyticsTab; icon: typeof Activity; description: string }[] = [
   { label: 'Risk & benchmark', icon: Gauge, description: 'Risk measures and regression against the selected instrument buy-and-hold series' },
   { label: 'Costs & trades', icon: SlidersHorizontal, description: 'Execution assumptions and trade economics' },
   { label: 'Walk-forward', icon: Layers3, description: 'Training windows and held-out periods' },
@@ -79,8 +79,7 @@ function makeHistogram(values: number[], count = 12) {
   return bins.map(bin => ({ ...bin, bin: `${(bin.midpoint * 100).toFixed(1)}%` }))
 }
 
-export function AdvancedAnalyticsView({ symbol, bars, config, loading, historyError, range, setRange }: { symbol: string; bars: NumericBar[]; config: BacktestConfig; loading: boolean; historyError: string; range: string; setRange: (value: string) => void }) {
-  const [activeTab, setActiveTab] = useState<AnalyticsTab>('Risk & benchmark')
+export function AdvancedAnalyticsView({ symbol, bars, config, loading, historyError, range, setRange, activeTab, onActiveTabChange }: { symbol: string; bars: NumericBar[]; config: BacktestConfig; loading: boolean; historyError: string; range: string; setRange: (value: string) => void; activeTab: AnalyticsTab; onActiveTabChange: (tab: AnalyticsTab) => void }) {
   const [commissionBps, setCommissionBps] = useState(config.commissionBps)
   const [slippageBps, setSlippageBps] = useState(config.slippageBps)
   const [marketImpactBps, setMarketImpactBps] = useState(config.marketImpactBps ?? 0)
@@ -165,7 +164,7 @@ export function AdvancedAnalyticsView({ symbol, bars, config, loading, historyEr
       <div><span className="eyebrow">Quant research suite · {symbol}</span><strong>Configurable model diagnostics</strong><small>Change assumptions to recalculate every related chart and estimate.</small></div>
       <div className="analytics-source"><span className="status-dot" />{pricedBars.length.toLocaleString()} daily observations<span className="toolbar-divider" />{costResult.trades.length} closed trades<span className="toolbar-divider" /><div className="range-tabs" role="group" aria-label="Analytics history range">{['1M', '3M', '6M', '1Y', '3Y', 'All'].map(value => <button type="button" key={value} aria-pressed={range === value} onClick={() => setRange(value)} className={range === value ? 'active' : ''}>{value}</button>)}</div></div>
     </div>
-    <div className="analytics-tabs" role="tablist" aria-label="Advanced analytics modules">{tabs.map(({ label, icon: Icon, description }) => <button id={`analytics-tab-${label.replaceAll(' ', '-').replace('&', 'and').toLowerCase()}`} aria-controls="analytics-panel" aria-selected={activeTab === label} role="tab" type="button" key={label} className={activeTab === label ? 'active' : ''} onClick={() => setActiveTab(label)} title={description}><Icon aria-hidden="true" />{label}</button>)}</div>
+    <div className="analytics-tabs" role="tablist" aria-label="Advanced analytics modules">{analyticsTabs.map(({ label, icon: Icon, description }) => <button id={`analytics-tab-${label.replaceAll(' ', '-').replace('&', 'and').toLowerCase()}`} aria-controls="analytics-panel" aria-selected={activeTab === label} role="tab" type="button" key={label} className={activeTab === label ? 'active' : ''} onClick={() => onActiveTabChange(label)} title={description}><Icon aria-hidden="true" />{label}</button>)}</div>
     {activeTab !== 'Monte Carlo' && !canCalculate && <div className="analytics-notice panel" role="status"><CircleHelp aria-hidden="true" /><span>{loading ? 'Loading provider-sourced price history…' : 'At least 60 daily observations are needed for stable, comparable analytics.'}</span></div>}
     <section id="analytics-panel" role="tabpanel" aria-labelledby={`analytics-tab-${activeTab.replaceAll(' ', '-').replace('&', 'and').toLowerCase()}`} className="analytics-tab-panel">
       {activeTab === 'Risk & benchmark' && <>
