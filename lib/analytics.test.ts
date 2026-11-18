@@ -138,6 +138,9 @@ describe('analytics calculations', () => {
     const second = monteCarloBootstrap([-0.02, -0.01, 0.005, 0.01, 0.02], 10000, 20, 250, 7)
     expect(first.fan).toEqual(second.fan)
     expect(first.fan).toHaveLength(21)
+    expect(first.trajectories).toHaveLength(240)
+    expect(first.trajectories[0]).toHaveLength(21)
+    expect(first.trajectories).toEqual(second.trajectories)
     expect(first.terminalP05).toBeLessThan(first.terminalP95!)
   })
   it('selects parameters on training folds and reports held-out periods', () => {
