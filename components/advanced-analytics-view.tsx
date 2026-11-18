@@ -4,8 +4,9 @@ import { useMemo, useState } from 'react'
 import { Activity, BarChart3, CircleHelp, Gauge, Layers3, Shield, SlidersHorizontal, Waves, X } from 'lucide-react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
+import { MonteCarloChart } from '@/components/monte-carlo-chart'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
-import { BacktestConfig, BacktestResult, historicalCVaR, monteCarloBootstrap, PricePoint, regressionRiskMetrics, runBacktest, tradeExpectancy, walkForwardValidation } from '@/lib/analytics'
+import { BacktestConfig, BacktestResult, dailyReturns, historicalCVaR, monteCarloBootstrap, PricePoint, regressionRiskMetrics, runBacktest, tradeExpectancy, walkForwardValidation } from '@/lib/analytics'
 
 type AnalyticsTab = 'Risk & benchmark' | 'Costs & trades' | 'Walk-forward' | 'Monte Carlo' | 'Stress lab'
 type Scenario = { id: number; label: string; shock: number }
@@ -15,9 +16,6 @@ const chartConfig = {
   strategy: { label: 'Strategy', color: 'var(--chart-1)' },
   benchmark: { label: 'Buy & hold', color: 'var(--chart-2)' },
   drawdown: { label: 'Drawdown', color: 'var(--chart-5)' },
-  p05: { label: '5th percentile', color: 'var(--chart-5)' },
-  median: { label: 'Median', color: 'var(--chart-1)' },
-  p95: { label: '95th percentile', color: 'var(--chart-2)' },
   return: { label: 'Trade return', color: 'var(--chart-3)' },
   cost: { label: 'Estimated cost', color: 'var(--chart-4)' },
 } satisfies ChartConfig
@@ -81,7 +79,7 @@ function makeHistogram(values: number[], count = 12) {
   return bins.map(bin => ({ ...bin, bin: `${(bin.midpoint * 100).toFixed(1)}%` }))
 }
 
-export function AdvancedAnalyticsView({ symbol, bars, config, result, loading, range, setRange }: { symbol: string; bars: NumericBar[]; config: BacktestConfig; result: BacktestResult; loading: boolean; range: string; setRange: (value: string) => void }) {
+export function AdvancedAnalyticsView({ symbol, bars, config, loading, historyError, range, setRange }: { symbol: string; bars: NumericBar[]; config: BacktestConfig; loading: boolean; historyError: string; range: string; setRange: (value: string) => void }) {
   const [activeTab, setActiveTab] = useState<AnalyticsTab>('Risk & benchmark')
   const [commissionBps, setCommissionBps] = useState(config.commissionBps)
   const [slippageBps, setSlippageBps] = useState(config.slippageBps)
@@ -97,6 +95,8 @@ export function AdvancedAnalyticsView({ symbol, bars, config, result, loading, r
   const [simulationPaths, setSimulationPaths] = useState(1200)
   const [simulationDensity, setSimulationDensity] = useState(160)
   const [simulationSeed, setSimulationSeed] = useState(42)
+  const [simulationSource, setSimulationSource] = useState<'price' | 'strategy'>('price')
+  const [showFullRange, setShowFullRange] = useState(false)
   const [scenarios, setScenarios] = useState<Scenario[]>([
     { id: 1, label: 'Broad risk-off', shock: -20 },
     { id: 2, label: 'Volatility spike', shock: -12 },
@@ -116,19 +116,20 @@ export function AdvancedAnalyticsView({ symbol, bars, config, result, loading, r
   const drawdowns = useMemo(() => drawdownPath(costResult.equity), [costResult.equity])
   const recovery = useMemo(() => recoveryStats(costResult.equity), [costResult.equity])
   const historyReturns = useMemo(() => strategyReturns.filter(Number.isFinite), [strategyReturns])
-  const simulations = useMemo(() => monteCarloBootstrap(historyReturns, capital, simulationDays, simulationPaths, symbolSeed(simulationSeed, symbol), 240), [historyReturns, capital, simulationDays, simulationPaths, simulationSeed, symbol])
-  const visibleTrajectories = useMemo(() => simulations.trajectories.slice(0, simulationDensity), [simulations, simulationDensity])
-  const simulationChartData = useMemo(() => simulations.fan.map((point, stepIndex) => ({ ...point, confidenceWidth: point.p95 - point.p05, ...Object.fromEntries(visibleTrajectories.map((trajectory, pathIndex) => [`path-${pathIndex}`, trajectory[stepIndex]])) })), [simulations, visibleTrajectories])
-  const simulationDomain = useMemo(() => {
-    let minimum = Infinity, maximum = -Infinity
-    for (const trajectory of simulations.trajectories) for (const value of trajectory) {
-      minimum = Math.min(minimum, value)
-      maximum = Math.max(maximum, value)
-    }
-    if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return ['auto', 'auto'] as [string, string]
-    const padding = (maximum - minimum) * 0.035
-    return [Math.max(0, minimum - padding), maximum + padding] as [number, number]
-  }, [simulations])
+  const simulationReturns = useMemo(() => (simulationSource === 'price' ? dailyReturns(pricedBars) : historyReturns).filter(value => value > -1), [simulationSource, pricedBars, historyReturns])
+  const simulationStatus = loading ? `Loading daily prices for ${symbol}…`
+    : historyError && !pricedBars.length ? `Could not load daily prices for ${symbol}. ${historyError}`
+    : !Number.isInteger(simulationDays) || simulationDays < 20 || simulationDays > 504 ? 'Enter a horizon of 20 to 504 sessions.'
+    : !Number.isInteger(simulationPaths) || simulationPaths < 100 || simulationPaths > 2000 ? 'Enter a path count of 100 to 2,000.'
+    : !Number.isInteger(simulationSeed) || simulationSeed < 1 || simulationSeed > 2147483647 ? 'Enter a whole-number seed from 1 to 2,147,483,647.'
+    : !Number.isFinite(capital) || capital < 100 || capital > 100000000 ? 'Enter starting capital between $100 and $100,000,000.'
+    : simulationReturns.length < 20 ? simulationSource === 'strategy'
+      ? 'At least 20 strategy returns are needed after indicator warm-up. Try a longer history range or switch to daily price returns.'
+      : `${symbol} needs at least 20 daily price returns. Try a longer history range.`
+    : null
+  const simulations = useMemo(() => activeTab === 'Monte Carlo' && simulationStatus === null
+    ? monteCarloBootstrap(simulationReturns, capital, simulationDays, simulationPaths, symbolSeed(simulationSeed, symbol), 240)
+    : null, [activeTab, simulationStatus, simulationReturns, capital, simulationDays, simulationPaths, simulationSeed, symbol])
   const folds = useMemo(() => walkForwardValidation(pricedBars, { ...config, initialCapital: capital, commissionBps, slippageBps, marketImpactBps }, { trainBars: trainingBars, testBars: testingBars, rolling: rollingWindow, candidates: [
     { fastWindow: config.fastWindow, slowWindow: config.slowWindow },
     { fastWindow: config.fastWindow + 5, slowWindow: config.slowWindow + 10 },
@@ -165,7 +166,7 @@ export function AdvancedAnalyticsView({ symbol, bars, config, result, loading, r
       <div className="analytics-source"><span className="status-dot" />{pricedBars.length.toLocaleString()} daily observations<span className="toolbar-divider" />{costResult.trades.length} closed trades<span className="toolbar-divider" /><div className="range-tabs" role="group" aria-label="Analytics history range">{['1M', '3M', '6M', '1Y', '3Y', 'All'].map(value => <button type="button" key={value} aria-pressed={range === value} onClick={() => setRange(value)} className={range === value ? 'active' : ''}>{value}</button>)}</div></div>
     </div>
     <div className="analytics-tabs" role="tablist" aria-label="Advanced analytics modules">{tabs.map(({ label, icon: Icon, description }) => <button id={`analytics-tab-${label.replaceAll(' ', '-').replace('&', 'and').toLowerCase()}`} aria-controls="analytics-panel" aria-selected={activeTab === label} role="tab" type="button" key={label} className={activeTab === label ? 'active' : ''} onClick={() => setActiveTab(label)} title={description}><Icon aria-hidden="true" />{label}</button>)}</div>
-    {!canCalculate && <div className="analytics-notice panel" role="status"><CircleHelp aria-hidden="true" /><span>{loading ? 'Loading provider-sourced price history…' : 'At least 60 daily observations are needed for stable, comparable analytics.'}</span></div>}
+    {activeTab !== 'Monte Carlo' && !canCalculate && <div className="analytics-notice panel" role="status"><CircleHelp aria-hidden="true" /><span>{loading ? 'Loading provider-sourced price history…' : 'At least 60 daily observations are needed for stable, comparable analytics.'}</span></div>}
     <section id="analytics-panel" role="tabpanel" aria-labelledby={`analytics-tab-${activeTab.replaceAll(' ', '-').replace('&', 'and').toLowerCase()}`} className="analytics-tab-panel">
       {activeTab === 'Risk & benchmark' && <>
         <div className="metrics-grid advanced-metrics"><Metric label="Annualized alpha" value={percent(factorMetrics.alpha)} note="OLS intercept vs buy-and-hold" tone={(factorMetrics.alpha ?? 0) >= 0 ? 'positive' : 'negative'} /><Metric label="Asset beta" value={number(factorMetrics.beta, 3)} note="Sensitivity vs buy-and-hold" /><Metric label={`${confidence}% historical VaR`} value={percent(varLevel)} note="Single-session empirical tail" tone="negative" /><Metric label="Tracking error" value={percent(factorMetrics.trackingError)} note={`IR ${number(factorMetrics.informationRatio)}`} /></div>
@@ -185,8 +186,45 @@ export function AdvancedAnalyticsView({ symbol, bars, config, result, loading, r
         <Panel title="Held-out fold performance" eyebrow="No test-period parameter selection"><ChartContainer config={chartConfig} className="advanced-chart"><BarChart data={folds.map((fold, index) => ({ ...fold, fold: `Fold ${index + 1}`, oos: (fold.outOfSampleReturn ?? 0) * 100 }))} accessibilityLayer><CartesianGrid vertical={false} strokeDasharray="3 3" /><XAxis dataKey="fold" tickLine={false} axisLine={false} /><YAxis tickLine={false} axisLine={false} tickFormatter={value => `${Number(value).toFixed(0)}%`} /><ChartTooltip content={<ChartTooltipContent formatter={value => `${number(Number(value))}%`} />} /><Bar dataKey="oos" name="Held-out return" fill="var(--color-strategy)" radius={[3, 3, 0, 0]} /></BarChart></ChartContainer><div className="table-scroll"><table className="data-table"><thead><tr><th>Fold</th><th>Training period</th><th>Held-out period</th><th>Selected windows</th><th>Train Sharpe</th><th>OOS return</th></tr></thead><tbody>{folds.map((fold, index) => <tr key={`${fold.testStart}-${index}`}><td>{index + 1}</td><td>{fold.trainStart.slice(0, 10)} → {fold.trainEnd.slice(0, 10)}</td><td>{fold.testStart.slice(0, 10)} → {fold.testEnd.slice(0, 10)}</td><td>{fold.fastWindow} / {fold.slowWindow}</td><td>{number(fold.trainingSharpe)}</td><td className={(fold.outOfSampleReturn ?? 0) >= 0 ? 'positive' : 'negative'}>{percent(fold.outOfSampleReturn)}</td></tr>)}</tbody></table>{!folds.length && <div className="chart-placeholder">Increase history or reduce the training window to create validation folds.</div>}</div></Panel>
       </>}
       {activeTab === 'Monte Carlo' && <>
-        <Panel title="Bootstrap design" eyebrow="Resample net historical strategy returns with replacement"><FieldGroup className="analytics-control-grid"><NumberField id="simulation-days" label="Projection horizon" value={simulationDays} min={20} max={504} step={20} suffix="sessions" onChange={setSimulationDays} /><NumberField id="simulation-paths" label="Simulation paths" value={simulationPaths} min={100} max={2000} step={100} onChange={setSimulationPaths} /><NumberField id="simulation-seed" label="Random seed" value={simulationSeed} min={1} max={2147483647} onChange={setSimulationSeed} /><NumberField id="simulation-capital" label="Starting capital" value={capital} min={100} max={100000000} step={1000} onChange={setCapital} /></FieldGroup><div className="analytics-inline-stats"><span>5th percentile <strong>{money(simulations.terminalP05)}</strong></span><span>Median ending value <strong>{money(simulations.terminalMedian)}</strong></span><span>95th percentile <strong>{money(simulations.terminalP95)}</strong></span><span>Probability below start <strong>{percent(simulations.probabilityOfLoss)}</strong></span><span>5th percentile max drawdown <strong className="negative">{percent(simulations.maxDrawdownP05)}</strong></span></div><p className="method-note">This single-series bootstrap samples observed strategy returns independently (iid). The entered seed is combined with the selected symbol, giving each company distinct but reproducible paths. It does not preserve serial or cross-asset dependence, model regime shifts, liquidity, changing volatility, or future costs. The distribution is illustrative, not predictive.</p></Panel>
-        <Panel title="Monte Carlo trajectory cloud" eyebrow={`${visibleTrajectories.length} sampled of ${number(simulationPaths, 0)} paths · ${number(simulationDays, 0)} sessions`} action={<div className="simulation-density-control"><span>VISIBLE PATHS</span><div className="range-tabs" role="group" aria-label="Visible simulation paths">{[80, 160, 240].map(density => <button key={density} type="button" aria-pressed={simulationDensity === density} className={simulationDensity === density ? 'active' : ''} onClick={() => setSimulationDensity(density)}>{density}</button>)}</div></div>}><div className="simulation-chart-legend" aria-label="Monte Carlo chart legend"><span><i className="legend-path-up" aria-hidden="true" />Above start</span><span><i className="legend-path-down" aria-hidden="true" />Below start</span><span><i className="legend-range" aria-hidden="true" />5–95% range</span><span><i className="legend-median" aria-hidden="true" />Median</span></div><ChartContainer config={chartConfig} className="advanced-chart monte-carlo-chart"><AreaChart data={simulationChartData} accessibilityLayer margin={{ top: 8, right: 18, bottom: 18, left: 6 }}><CartesianGrid vertical stroke="var(--chart-grid)" strokeDasharray="2 5" /><XAxis dataKey="step" tickLine={false} axisLine={false} minTickGap={32} interval="preserveStartEnd" tickFormatter={value => `${value}`} label={{ value: 'Forward sessions', position: 'insideBottom', offset: -10 }} /><YAxis tickLine={false} axisLine={false} tickFormatter={value => money(Number(value))} width={82} domain={simulationDomain} allowDataOverflow /><ChartTooltip cursor={{ stroke: 'var(--chart-axis)', strokeDasharray: '3 3' }} labelFormatter={(_, payload) => `Session ${payload?.[0]?.payload?.step ?? ''}`} content={<ChartTooltipContent formatter={value => money(Number(value))} />} /><Area dataKey="p05" stackId="interval" stroke="none" fill="transparent" fillOpacity={0} tooltipType="none" isAnimationActive={false} /><Area dataKey="confidenceWidth" stackId="interval" name="5–95% range" stroke="none" fill="var(--color-p95)" fillOpacity={0.1} tooltipType="none" isAnimationActive={false} />{visibleTrajectories.map((trajectory, index) => <Line key={`trajectory-${index}`} dataKey={`path-${index}`} name={`Path ${index + 1}`} stroke={trajectory.at(-1)! >= capital ? 'var(--color-strategy)' : 'var(--color-drawdown)'} strokeOpacity={0.13} strokeWidth={0.8} dot={false} activeDot={false} isAnimationActive={false} tooltipType="none" />)}<Line dataKey="p05" name="5th percentile" stroke="var(--color-p05)" strokeOpacity={0.75} strokeWidth={1} dot={false} isAnimationActive={false} /><Line dataKey="p95" name="95th percentile" stroke="var(--color-p95)" strokeOpacity={0.75} strokeWidth={1} dot={false} isAnimationActive={false} /><Line dataKey="median" name="Median" stroke="var(--color-median)" strokeWidth={2.2} dot={false} isAnimationActive={false} /></AreaChart></ChartContainer><p className="method-note">Each thin trace is one seeded bootstrap path; green/red indicates its ending value relative to starting capital. The shaded interval spans the 5th–95th percentile. The iid bootstrap is illustrative, not predictive.</p></Panel>
+        <Panel title="Bootstrap design" eyebrow={`${symbol} · ${range} history`}>
+          <FieldGroup className="analytics-control-grid">
+            <Field className="analytics-field">
+              <FieldLabel htmlFor="simulation-source">Return source</FieldLabel>
+              <select id="simulation-source" value={simulationSource} onChange={event => setSimulationSource(event.target.value === 'strategy' ? 'strategy' : 'price')}>
+                <option value="price">Daily price returns</option>
+                <option value="strategy">Net strategy returns</option>
+              </select>
+            </Field>
+            <NumberField id="simulation-days" label="Projection horizon" value={simulationDays} min={20} max={504} suffix="sessions" onChange={setSimulationDays} />
+            <NumberField id="simulation-paths" label="Simulation paths" value={simulationPaths} min={100} max={2000} onChange={setSimulationPaths} />
+            <NumberField id="simulation-seed" label="Random seed" value={simulationSeed} min={1} max={2147483647} onChange={setSimulationSeed} />
+            <NumberField id="simulation-capital" label="Starting capital" value={capital} min={100} max={100000000} step={0.01} onChange={setCapital} />
+          </FieldGroup>
+          {simulations && <div className="analytics-inline-stats">
+            <span>5th percentile <strong>{money(simulations.terminalP05, 2)}</strong></span>
+            <span>Median ending value <strong>{money(simulations.terminalMedian, 2)}</strong></span>
+            <span>95th percentile <strong>{money(simulations.terminalP95, 2)}</strong></span>
+            <span>Probability below start <strong>{percent(simulations.probabilityOfLoss)}</strong></span>
+            <span>5th percentile max drawdown <strong className="negative">{percent(simulations.maxDrawdownP05)}</strong></span>
+          </div>}
+          <p className="method-note">{simulationSource === 'price' ? 'Daily price returns model buy-and-hold before trading costs.' : 'Net strategy returns include configured trading costs and sessions spent in cash.'} The model samples daily returns independently, with replacement. The same ticker, history, seed, and settings reproduce the same paths. The results are illustrative, not forecasts.</p>
+        </Panel>
+        <Panel title={`${symbol} Monte Carlo trajectory cloud`} eyebrow={simulations ? `${Math.min(simulations.trajectories.length, simulationDensity)} shown of ${number(simulations.paths, 0)} paths · ${simulations.steps} sessions · ${number(simulationReturns.length, 0)} historical returns` : 'Simulation results'}>
+          {simulations ? <>
+            {simulationReturns.length < 60 && <p className="method-note simulation-flat-notice">This projection uses only {simulationReturns.length} historical returns. A longer range gives the model more market conditions to sample.</p>}
+            {simulationReturns.every(value => value === simulationReturns[0]) && <p className="method-note simulation-flat-notice">{simulationSource === 'strategy' ? 'Strategy returns did not vary in this range, so all paths overlap. Try a longer history range or switch to daily price returns.' : 'Daily price returns did not vary in this range, so all paths overlap. Try a longer history range.'}</p>}
+            <div className="simulation-controls">
+              <div className="simulation-control"><span>VISIBLE PATHS</span><div className="range-tabs" role="group" aria-label="Visible simulation paths">
+                {[80, 160, 240].map(density => <button key={density} type="button" aria-pressed={simulationDensity === density} className={simulationDensity === density ? 'active' : ''} onClick={() => setSimulationDensity(density)}>{density}</button>)}
+              </div></div>
+              <div className="simulation-control"><span>Y-AXIS</span><div className="range-tabs" role="group" aria-label="Simulation chart scale">
+                <button type="button" aria-pressed={!showFullRange} className={!showFullRange ? 'active' : ''} onClick={() => setShowFullRange(false)}>Typical range</button>
+                <button type="button" aria-pressed={showFullRange} className={showFullRange ? 'active' : ''} onClick={() => setShowFullRange(true)}>Full range</button>
+              </div></div>
+            </div>
+            <MonteCarloChart simulation={simulations} density={simulationDensity} capital={capital} fullRange={showFullRange} />
+          </> : <div className="chart-placeholder simulation-empty" role="status">{simulationStatus}</div>}
+        </Panel>
       </>}
       {activeTab === 'Stress lab' && <>
         <Panel title="Scenario definitions" eyebrow="Adjust shocks; impacts scale by invested notional"><FieldGroup className="analytics-control-grid">{scenarios.map(scenario => <div className="scenario-editor" key={scenario.id}><Field className="analytics-field"><FieldLabel htmlFor={`scenario-name-${scenario.id}`}>Scenario label</FieldLabel><input id={`scenario-name-${scenario.id}`} value={scenario.label} onChange={event => updateScenario(scenario.id, 'label', event.target.value)} maxLength={40} /></Field><NumberField id={`scenario-shock-${scenario.id}`} label="One-step shock" value={scenario.shock} min={-100} max={100} suffix="%" onChange={value => updateScenario(scenario.id, 'shock', String(value))} /><button className="icon-button danger-text" type="button" aria-label={`Remove ${scenario.label}`} onClick={() => setScenarios(items => items.filter(item => item.id !== scenario.id))}><X aria-hidden="true" /></button></div>)}<div className="scenario-add"><Field className="analytics-field"><FieldLabel htmlFor="custom-scenario-label">New scenario</FieldLabel><input id="custom-scenario-label" value={customLabel} onChange={event => setCustomLabel(event.target.value)} maxLength={40} /></Field><NumberField id="custom-scenario-shock" label="One-step shock" value={customShock} min={-100} max={100} suffix="%" onChange={setCustomShock} /><button className="button small" type="button" onClick={addScenario}>Add scenario</button></div></FieldGroup><p className="method-note">Stress loss = starting capital × allocation × shock. This is a transparent first-order sensitivity, not a full repricing model or historical market replay.</p></Panel>

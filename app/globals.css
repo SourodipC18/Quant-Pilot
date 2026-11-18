@@ -358,9 +358,12 @@ h2 { margin: 4px 0 0; font-size: 13px; letter-spacing: -.015em; font-weight: 650
 .advanced-chart-panel { min-width: 0; }
 .advanced-chart { width: 100%; height: 290px; min-height: 220px; }
 .monte-carlo-chart { height: 410px; min-height: 300px; }
-.simulation-density-control { display: flex; align-items: center; gap: 7px; }
-.simulation-density-control > span { color: var(--faint); font-size: 8px; font-weight: 650; letter-spacing: .06em; white-space: nowrap; }
-.simulation-density-control .range-tabs button { min-width: 30px; }
+.simulation-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+.simulation-control { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.simulation-control > span { color: var(--muted); font-size: 9px; font-weight: 650; letter-spacing: .06em; white-space: nowrap; }
+.simulation-control .range-tabs button { min-width: 34px; min-height: 25px; }
+.simulation-empty { min-height: 220px; height: auto; font-size: 12px; }
+.simulation-flat-notice { margin-top: 0; margin-bottom: 12px; }
 .simulation-chart-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: -2px 0 3px; }
 .simulation-chart-legend > span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 9px; }
 .simulation-chart-legend i { display: inline-block; width: 18px; height: 0; border-top: 1.5px solid; }
