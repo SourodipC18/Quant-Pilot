@@ -1,12 +1,13 @@
 import { and, desc, eq } from 'drizzle-orm'
-import { headers } from 'next/headers'
-import { NextResponse } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
 import { z } from 'zod'
-import { auth } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { backtestRuns, experiments, portfolioHoldings, portfolios, savedStrategies, watchlistItems } from '@/lib/db/schema'
+import { guestWorkspaceEnabled } from '@/lib/workspace-access'
 
 export const runtime = 'nodejs'
+const guestCookieName = '__Host-quantpilot-guest'
+const guestKeySchema = z.uuidv4()
 const symbolSchema = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9._:/-]+$/)
 const jsonSchema = z.record(z.string(), z.unknown())
 const inputSchema = z.discriminatedUnion('type', [
@@ -19,14 +20,32 @@ const inputSchema = z.discriminatedUnion('type', [
 ])
 const deleteSchema = z.object({ type: z.enum(['watchlist', 'portfolio', 'holding', 'strategy', 'backtest', 'experiment']), id: z.string().uuid() })
 
-async function getUserId() {
-  const session = await auth.api.getSession({ headers: await headers() })
+async function getUserId(request: NextRequest) {
+  if (guestWorkspaceEnabled) {
+    const guestKey = guestKeySchema.safeParse(request.cookies.get(guestCookieName)?.value)
+    return guestKey.success ? `guest:${guestKey.data}` : null
+  }
+
+  const { auth } = await import('@/lib/auth')
+  const session = await auth.api.getSession({ headers: request.headers })
   return session?.user?.id ?? null
 }
 
-export async function GET() {
-  const userId = await getUserId()
-  if (!userId) return NextResponse.json({ error: 'Sign in to access your workspace.' }, { status: 401 })
+function workspaceAccessError(action: string) {
+  return guestWorkspaceEnabled
+    ? NextResponse.json({ error: 'Your guest workspace could not be opened. Allow cookies and refresh the page.' }, { status: 409 })
+    : NextResponse.json({ error: `Sign in to ${action}.` }, { status: 401 })
+}
+
+function isJsonRequest(request: NextRequest) {
+  return request.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() === 'application/json'
+}
+
+export async function GET(request: NextRequest) {
+  const existingUserId = await getUserId(request)
+  const guestKey = !existingUserId && guestWorkspaceEnabled ? crypto.randomUUID() : null
+  const userId = guestKey ? `guest:${guestKey}` : existingUserId
+  if (!userId) return workspaceAccessError('access your workspace')
   try {
     const [watchlist, userPortfolios, holdings, strategies, backtests, savedExperiments] = await Promise.all([
       db.select().from(watchlistItems).where(eq(watchlistItems.userId, userId)).orderBy(desc(watchlistItems.createdAt)).limit(100),
@@ -36,15 +55,28 @@ export async function GET() {
       db.select().from(backtestRuns).where(eq(backtestRuns.userId, userId)).orderBy(desc(backtestRuns.createdAt)).limit(100),
       db.select().from(experiments).where(eq(experiments.userId, userId)).orderBy(desc(experiments.updatedAt)).limit(100),
     ])
-    return NextResponse.json({ watchlist, portfolios: userPortfolios, holdings, strategies, backtests, experiments: savedExperiments })
+    const response = NextResponse.json(
+      { watchlist, portfolios: userPortfolios, holdings, strategies, backtests, experiments: savedExperiments },
+      { headers: { 'Cache-Control': 'private, no-store' } },
+    )
+    if (guestKey) response.cookies.set(guestCookieName, guestKey, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      partitioned: true,
+      path: '/',
+      maxAge: 30 * 24 * 60 * 60,
+    })
+    return response
   } catch {
     return NextResponse.json({ error: 'Unable to load the saved workspace.' }, { status: 500 })
   }
 }
 
-export async function POST(request: Request) {
-  const userId = await getUserId()
-  if (!userId) return NextResponse.json({ error: 'Sign in to save workspace data.' }, { status: 401 })
+export async function POST(request: NextRequest) {
+  if (!isJsonRequest(request)) return NextResponse.json({ error: 'Expected application/json.' }, { status: 415 })
+  const userId = await getUserId(request)
+  if (!userId) return workspaceAccessError('save workspace data')
   let body: unknown
   try { body = await request.json() } catch { return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 }) }
   const parsed = inputSchema.safeParse(body)
@@ -73,9 +105,10 @@ export async function POST(request: Request) {
   }
 }
 
-export async function DELETE(request: Request) {
-  const userId = await getUserId()
-  if (!userId) return NextResponse.json({ error: 'Sign in to edit your workspace.' }, { status: 401 })
+export async function DELETE(request: NextRequest) {
+  if (!isJsonRequest(request)) return NextResponse.json({ error: 'Expected application/json.' }, { status: 415 })
+  const userId = await getUserId(request)
+  if (!userId) return workspaceAccessError('edit your workspace')
   let body: unknown
   try { body = await request.json() } catch { return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 }) }
   const parsed = deleteSchema.safeParse(body)
