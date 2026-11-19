@@ -3,10 +3,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { backtestRuns, experiments, portfolioHoldings, portfolios, savedStrategies, watchlistItems } from '@/lib/db/schema'
-import { guestWorkspaceEnabled } from '@/lib/workspace-access'
+import { guestCookieName, guestWorkspaceEnabled } from '@/lib/workspace-access'
 
 export const runtime = 'nodejs'
-const guestCookieName = '__Host-quantpilot-guest'
 const guestKeySchema = z.uuidv4()
 const symbolSchema = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9._:/-]+$/)
 const jsonSchema = z.record(z.string(), z.unknown())
