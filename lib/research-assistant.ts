@@ -1,6 +1,6 @@
 import { generateText, Output } from 'ai'
 import { z } from 'zod'
-import { researchQuestions, type ResearchEvidence, type ResearchInterpretation, type ResearchQuestion } from './research-evidence'
+import { researchQuestions, researchSourceLabel, type ResearchEvidence, type ResearchInterpretation, type ResearchQuestion } from './research-evidence'
 
 const notes: Record<string, string> = {
   regime: 'The latest label summarizes conditions at that close; it is not a signal about the next session.',
@@ -34,7 +34,7 @@ export function citeInterpretation(report: ResearchEvidence, ids: string[]): Res
   return [...new Set(ids)].flatMap(id => {
     const choice = choices.find(item => item.fact.id === id)
     if (!choice) return []
-    return [{ ...choice, provenance: `Twelve Data (${report.sources.map(source => source.symbol).join(', ')}) · ${choice.fact.date ?? `${report.from} to ${report.to}`} · QuantPilot run ${report.id}` }]
+    return [{ ...choice, provenance: `${[...new Set(report.sources.map(source => researchSourceLabel(source.provider)))].join(', ')} (${report.sources.map(source => source.symbol).join(', ')}) · ${choice.fact.date ?? `${report.from} to ${report.to}`} · QuantPilot run ${report.id}` }]
   })
 }
 

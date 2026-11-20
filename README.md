@@ -204,7 +204,7 @@ The repository includes independent Python and R implementations under `analytic
 - Better Auth
 
 ### Financial Data
-- Twelve Data API integration
+- Twelve Data (US and supported international markets) and Upstox (NSE/BSE), routed by listing exchange
 - Historical market price data
 - Financial data endpoints supported by the configured provider plan
 
@@ -303,6 +303,7 @@ Example:
 DATABASE_URL=your_postgresql_connection_string
 
 TWELVE_DATA_API_KEY=your_twelve_data_api_key
+UPSTOX_ANALYTICS_TOKEN=your_read_only_upstox_analytics_token
 
 BETTER_AUTH_SECRET=your_auth_secret
 BETTER_AUTH_URL=http://localhost:3000
@@ -310,7 +311,12 @@ BETTER_AUTH_URL=http://localhost:3000
 
 Additional environment variables may be required depending on the configured AI provider and deployment setup.
 
-**Important:** Never commit `.env` files or expose API keys in client-side code.
+**Important:** Never commit `.env` files or expose API keys in client-side code. On Vercel, set the credentials as server-side environment variables for each environment you use, then redeploy.
+
+- **Twelve Data** covers US and supported international listings, subject to the existing key’s entitlements and quota. Its default history basis is split-adjusted.
+- **Upstox** covers NSE and BSE equities, indices, and listed ETFs from its official catalogue. Generate a free, read-only [Analytics Token](https://upstox.com/developer/api-documentation/analytics-token/) and set `UPSTOX_ANALYTICS_TOKEN`. Tokens expire after one year. No brokerage or order operations are used.
+- Choose the exchange listing in instrument search, or use identifiers like `RELIANCE:NSE`, `SENSEX:BSE`, and `AAPL:NASDAQ` in symbol fields. Previously saved bare symbols remain supported for non-Indian listings. Nifty 50 and Sensex are available as portfolio benchmarks alongside the existing US benchmark.
+- Upstox V3 returns prices as reported, without an adjustment selector. Splits and other corporate actions can distort returns; check Data Quality and choose a suitable historical window. Combined analytics require a verified common currency; no FX conversion or missing-price imputation is performed.
 
 ### 4. Set Up the Database
 

@@ -4,7 +4,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: { default: 'QuantPilot — Quantitative Research Terminal', template: '%s · QuantPilot' },
-  description: 'Research market history, test systematic strategies, track portfolio risk, and compare experiments in a private quantitative research workspace.',
+  description: 'Research US, Indian and global market history, test systematic strategies, and analyze portfolio risk in a private quantitative research workspace.',
   generator: 'v0.app',
   icons: {
     icon: [

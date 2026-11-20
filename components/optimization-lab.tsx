@@ -6,18 +6,19 @@ import useSWR from 'swr'
 import { ArrowRight, Box, Database, Play, Wallet } from 'lucide-react'
 import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { OptimizationResults } from '@/components/optimization-results'
+import { PROVIDER_LABELS, verifiedCurrency, type ProviderId } from '@/lib/market-instruments'
 import { calculateOptimizationLab, LAB_WINDOWS, labConstraintError, MAX_LAB_ASSETS, type LabAsset, type LabWindow } from '@/lib/optimization-lab'
 
 type Portfolio = { id: string; name: string }
 type Holding = { symbol: string; shares: string }
-type History = { values: { datetime: string; close: string }[]; meta?: { currency?: unknown }; source: string; lastSyncedAt?: string }
+type History = { values: { datetime: string; close: string }[]; meta?: { currency?: unknown }; source: ProviderId; lastSyncedAt?: string }
 type HistoryKey = readonly ['optimization-history', ...string[]]
 type Setup = { symbols: string[]; window: LabWindow; cap: number }
 const windowLabels: Record<LabWindow, string> = { '6M': 'Last 6 months', '1Y': 'Last 1 year', '2Y': 'Last 2 years' }
 
 async function loadHistories([, ...symbols]: HistoryKey) {
   return Promise.all(symbols.map(async symbol => {
-    const query = new URLSearchParams({ action: 'history', symbol, interval: '1day', outputsize: '750', adjust: 'splits' })
+    const query = new URLSearchParams({ action: 'history', symbol, interval: '1day', outputsize: '750' })
     try {
       const response = await fetch(`/api/market?${query}`, { signal: AbortSignal.timeout(15_000) })
       const history = await response.json().catch(() => null)
@@ -74,14 +75,14 @@ function OptimizationSetup({ portfolios, portfolio, holdings, providerConfigured
   const calculation = useMemo(() => {
     if (!run || !histories) return null
     const assets: LabAsset[] = histories.map(({ symbol, history }) => ({
-      symbol, currency: typeof history.meta?.currency === 'string' ? history.meta.currency.trim().toUpperCase() : undefined,
+      symbol, currency: verifiedCurrency(history.meta?.currency),
       points: history.values.map(({ datetime, close }) => ({ datetime, close: Number(close) })),
     }))
     const currentShares = eligible.size === run.symbols.length ? run.symbols.map(symbol => eligible.get(symbol)!) : undefined
     return calculateOptimizationLab(assets, run.window, run.cap, currentShares)
   }, [run, histories, eligible])
   const pending = run && (run.cap !== Number(cap) || run.window !== window || run.symbols.join('|') !== symbols.join('|'))
-  const sources = [...new Set(histories?.map(({ history }) => history.source).filter(Boolean))].join(', ')
+  const sources = [...new Set(histories?.map(({ history }) => PROVIDER_LABELS[history.source]).filter(Boolean))].join(', ')
   const fetchTimes = histories?.map(({ history }) => history.lastSyncedAt).filter((date): date is string => typeof date === 'string').sort() ?? []
   const oldestFetch = fetchTimes.length === histories?.length ? fetchTimes[0] : undefined
 
@@ -113,10 +114,10 @@ function OptimizationSetup({ portfolios, portfolio, holdings, providerConfigured
           <button type="submit" className="button primary" disabled={Boolean(constraintError) || isLoading || providerConfigured === false}><Play size={14} aria-hidden="true" /> {isLoading ? 'Loading history…' : 'Run optimization'}</button>
         </div>
       </form>
-      {providerConfigured === false && <p className="optimization-feedback" role="status"><Database size={16} aria-hidden="true" /> Market history is unavailable until Twelve Data is configured.</p>}
+      {providerConfigured === false && <p className="optimization-feedback" role="status"><Database size={16} aria-hidden="true" /> Market history is unavailable until a market-data provider is configured.</p>}
       {pending && !isLoading && <p className="optimization-feedback" role="status">Inputs changed. Run optimization to apply the new settings.</p>}
     </section>
-    {isLoading ? <section className="panel app-panel optimization-state" role="status"><Database aria-hidden="true" /><h2>Loading aligned price history</h2><p>Requesting split-adjusted closes for the selected holdings.</p></section>
+    {isLoading ? <section className="panel app-panel optimization-state" role="status"><Database aria-hidden="true" /><h2>Loading aligned price history</h2><p>Requesting daily closes for the selected holdings.</p></section>
       : error || (calculation && 'error' in calculation) ? <section className="panel app-panel optimization-state" role="alert"><Database aria-hidden="true" /><h2>Optimization unavailable</h2><p>{error?.message ?? (calculation && 'error' in calculation ? calculation.error : '')}</p></section>
       : validRun && calculation && 'result' in calculation ? <OptimizationResults key={JSON.stringify(run)} result={calculation.result} cap={run.cap} window={windowLabels[run.window]} {...{ dark, sources, oldestFetch }} />
       : <section className="panel app-panel optimization-state" aria-labelledby="optimization-ready-title"><Box aria-hidden="true" /><h2 id="optimization-ready-title">3D Efficient Frontier</h2><p>Run the lab to compare feasible allocations by annualized volatility, expected return, and Sharpe ratio. Every plotted allocation is also available in a keyboard-accessible results table.</p></section>}

@@ -28,6 +28,15 @@ describe('research evidence delivery', () => {
     expect(researchInput.parse({ method: 'regimes', symbol: ' aapl ', lookback: 504 })).toMatchObject({ symbol: 'AAPL' })
   })
 
+  it('uses Upstox pricing for NSE/BSE research and cites INR data', async () => {
+    const adapter = vi.fn(async ({ symbol }: { symbol: string }) => symbol.includes(':') ? { ...history(symbol.split(':')[0], 'INR'), source: 'upstox', adjustment: 'none' as const } : history(symbol))
+    const report = await runResearch({ method: 'regimes', symbol: 'INFY:BSE', lookback: 252 }, adapter)
+    expect(adapter).toHaveBeenCalledWith({ symbol: 'INFY:BSE', interval: '1day', adjustment: 'none', outputsize: 253 })
+    expect(report.sources).toEqual([expect.objectContaining({ provider: 'upstox', currency: 'INR', symbol: 'INFY:BSE' })])
+    expect(citeInterpretation(report, ['regime'])[0].provenance).toContain('Upstox (INFY:BSE)')
+    await expect(runResearch({ method: 'scenarios', symbols: ['INFY:BSE', 'MSFT'], lookback: 252, horizon: 25, paths: 100, block: 1, seed: 7 }, adapter)).rejects.toThrow('same verified currency')
+  })
+
   it('binds exported evidence to the original owner, signature, and lifetime', async () => {
     const report = await regime(), token = sealResearch(report, 'guest:first', 'fixture-secret', 10)
     expect(openResearch(token, 'guest:first', 'fixture-secret', 20)).toEqual(JSON.parse(JSON.stringify(report)))

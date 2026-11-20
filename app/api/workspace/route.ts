@@ -1,13 +1,14 @@
 import { and, desc, eq } from 'drizzle-orm'
 import { NextResponse, type NextRequest } from 'next/server'
 import { z } from 'zod'
+import { SYMBOL_PATTERN } from '@/lib/market-instruments'
 import { db } from '@/lib/db'
 import { backtestRuns, experiments, portfolioHoldings, portfolios, savedStrategies, watchlistItems } from '@/lib/db/schema'
 import { guestCookieName, guestWorkspaceEnabled } from '@/lib/workspace-access'
 
 export const runtime = 'nodejs'
 const guestKeySchema = z.uuidv4()
-const symbolSchema = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9._:/-]+$/)
+const symbolSchema = z.string().trim().max(65).regex(SYMBOL_PATTERN)
 const jsonSchema = z.record(z.string(), z.unknown())
 const inputSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('watchlist.add'), symbol: symbolSchema, companyName: z.string().trim().min(1).max(160) }),

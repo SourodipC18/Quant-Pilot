@@ -5,6 +5,7 @@ import { Activity, BarChart3, CircleHelp, Gauge, Layers3, Shield, SlidersHorizon
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { MonteCarloChart } from '@/components/monte-carlo-chart'
+import { priceLabel } from '@/lib/market-instruments'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { BacktestConfig, BacktestResult, dailyReturns, historicalCVaR, monteCarloBootstrap, PricePoint, regressionRiskMetrics, runBacktest, tradeExpectancy, walkForwardValidation } from '@/lib/analytics'
 
@@ -28,7 +29,7 @@ export const analyticsTabs: { label: AnalyticsTab; icon: typeof Activity; descri
   { label: 'Stress lab', icon: Shield, description: 'Editable shock scenarios' },
 ]
 
-const money = (value: number | null | undefined, digits = 0) => value == null || !Number.isFinite(value) ? '—' : value.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: digits })
+
 const number = (value: number | null | undefined, digits = 2) => value == null || !Number.isFinite(value) ? '—' : value.toLocaleString(undefined, { maximumFractionDigits: digits })
 const percent = (value: number | null | undefined, digits = 2) => value == null || !Number.isFinite(value) ? '—' : `${value >= 0 ? '+' : ''}${(value * 100).toFixed(digits)}%`
 
@@ -79,7 +80,8 @@ function makeHistogram(values: number[], count = 12) {
   return bins.map(bin => ({ ...bin, bin: `${(bin.midpoint * 100).toFixed(1)}%` }))
 }
 
-export function AdvancedAnalyticsView({ symbol, bars, config, loading, historyError, range, setRange, activeTab, onActiveTabChange }: { symbol: string; bars: NumericBar[]; config: BacktestConfig; loading: boolean; historyError: string; range: string; setRange: (value: string) => void; activeTab: AnalyticsTab; onActiveTabChange: (tab: AnalyticsTab) => void }) {
+export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading, historyError, range, setRange, activeTab, onActiveTabChange }: { symbol: string; currency?: string; bars: NumericBar[]; config: BacktestConfig; loading: boolean; historyError: string; range: string; setRange: (value: string) => void; activeTab: AnalyticsTab; onActiveTabChange: (tab: AnalyticsTab) => void }) {
+  const money = (value: number | null | undefined, digits = 0) => priceLabel(value, currency, digits)
   const [commissionBps, setCommissionBps] = useState(config.commissionBps)
   const [slippageBps, setSlippageBps] = useState(config.slippageBps)
   const [marketImpactBps, setMarketImpactBps] = useState(config.marketImpactBps ?? 0)
@@ -177,7 +179,7 @@ export function AdvancedAnalyticsView({ symbol, bars, config, loading, historyEr
         <Panel title="Execution and capital assumptions" eyebrow="Re-run the strategy with editable frictions"><FieldGroup className="analytics-control-grid"><NumberField id="initial-capital" label="Starting capital" value={capital} min={100} max={100000000} step={1000} onChange={setCapital} /><NumberField id="allocation" label="Position allocation" value={allocationPct} min={1} max={100} suffix="%" onChange={setAllocationPct} /><NumberField id="commission-bps" label="Commission" value={commissionBps} min={0} max={500} suffix="bps" onChange={setCommissionBps} /><NumberField id="slippage-bps" label="Slippage" value={slippageBps} min={0} max={500} suffix="bps" onChange={setSlippageBps} /><NumberField id="impact-bps" label="Market impact" value={marketImpactBps} min={0} max={1000} suffix="bps" onChange={setMarketImpactBps} /></FieldGroup><p className="method-note">All frictions are modeled as additive basis points on each executed notional; impact is a user assumption, not inferred from incomplete volume data.</p></Panel>
         <div className="metrics-grid advanced-metrics"><Metric label="Net expectancy / trade" value={money(expectancy.expectancy)} note={`${number(expectancy.winRate == null ? null : expectancy.winRate * 100, 1)}% wins`} tone={(expectancy.expectancy ?? 0) >= 0 ? 'positive' : 'negative'} /><Metric label="Profit factor" value={number(expectancy.profitFactor)} note={`Payoff ratio ${number(expectancy.payoffRatio)}`} /><Metric label="Estimated total costs" value={money(estimatedTradeCosts)} note="Commission + slippage + impact" tone="negative" /><Metric label="Net turnover" value={`${number(costResult.turnover, 2)}×`} note={`${number(costResult.exposure == null ? null : costResult.exposure * 100, 1)}% time invested`} /></div>
         <div className="analytic-chart-grid"><Panel title="Closed trade return distribution" eyebrow={`${costResult.trades.length} trades · net of configured costs`} className="advanced-chart-panel"><ChartContainer config={chartConfig} className="advanced-chart"><BarChart data={tradeHistogram} accessibilityLayer><CartesianGrid vertical={false} strokeDasharray="3 3" /><XAxis dataKey="bin" tickLine={false} axisLine={false} minTickGap={24} /><YAxis allowDecimals={false} tickLine={false} axisLine={false} width={34} /><ChartTooltip content={<ChartTooltipContent />} /><Bar dataKey="count" name="Trades" fill="var(--color-return)" radius={[3, 3, 0, 0]} /></BarChart></ChartContainer><p className="method-note">Mean trade P&amp;L uses net proceeds after both-side transaction costs.</p></Panel>
-          <Panel title="Estimated cost attribution" eyebrow={`${number(commissionBps + slippageBps + marketImpactBps, 1)} bps per side`} className="advanced-chart-panel"><ChartContainer config={chartConfig} className="advanced-chart"><BarChart data={costBreakdown} accessibilityLayer><CartesianGrid vertical={false} strokeDasharray="3 3" /><XAxis dataKey="name" tickLine={false} axisLine={false} /><YAxis tickLine={false} axisLine={false} tickFormatter={value => `$${number(Number(value), 0)}`} width={52} /><ChartTooltip content={<ChartTooltipContent formatter={value => money(Number(value))} />} /><Bar dataKey="value" name="Estimated cost" fill="var(--color-cost)" radius={[3, 3, 0, 0]} /></BarChart></ChartContainer><p className="method-note">Flat-bps approximation; excludes taxes, borrow fees, and nonlinear market impact.</p></Panel></div>
+          <Panel title="Estimated cost attribution" eyebrow={`${number(commissionBps + slippageBps + marketImpactBps, 1)} bps per side`} className="advanced-chart-panel"><ChartContainer config={chartConfig} className="advanced-chart"><BarChart data={costBreakdown} accessibilityLayer><CartesianGrid vertical={false} strokeDasharray="3 3" /><XAxis dataKey="name" tickLine={false} axisLine={false} /><YAxis tickLine={false} axisLine={false} tickFormatter={value => money(Number(value))} width={52} /><ChartTooltip content={<ChartTooltipContent formatter={value => money(Number(value))} />} /><Bar dataKey="value" name="Estimated cost" fill="var(--color-cost)" radius={[3, 3, 0, 0]} /></BarChart></ChartContainer><p className="method-note">Flat-bps approximation; excludes taxes, borrow fees, and nonlinear market impact.</p></Panel></div>
         <Panel title="Trade ledger" eyebrow="Execution-level results"><div className="table-scroll"><table className="data-table"><thead><tr><th>Entry</th><th>Exit</th><th>Entry px</th><th>Exit px</th><th>Net return</th><th>Net P&amp;L</th><th>Estimated costs</th><th>Bars</th></tr></thead><tbody>{costResult.trades.slice(-20).reverse().map((trade, index) => <tr key={`${trade.entryDate}-${index}`}><td>{trade.entryDate.slice(0, 10)}</td><td>{trade.exitDate.slice(0, 10)}</td><td>{money(trade.entryPrice, 2)}</td><td>{money(trade.exitPrice, 2)}</td><td className={trade.return >= 0 ? 'positive' : 'negative'}>{percent(trade.return)}</td><td className={trade.pnl >= 0 ? 'positive' : 'negative'}>{money(trade.pnl)}</td><td>{money(trade.costs)}</td><td>{trade.barsHeld}</td></tr>)}</tbody></table>{!costResult.trades.length && <div className="chart-placeholder">No completed trades under the current assumptions.</div>}</div></Panel>
       </>}
       {activeTab === 'Walk-forward' && <>
@@ -221,7 +223,7 @@ export function AdvancedAnalyticsView({ symbol, bars, config, loading, historyEr
                 <button type="button" aria-pressed={showFullRange} className={showFullRange ? 'active' : ''} onClick={() => setShowFullRange(true)}>Full range</button>
               </div></div>
             </div>
-            <MonteCarloChart simulation={simulations} density={simulationDensity} capital={capital} fullRange={showFullRange} />
+            <MonteCarloChart currency={currency} simulation={simulations} density={simulationDensity} capital={capital} fullRange={showFullRange} />
           </> : <div className="chart-placeholder simulation-empty" role="status">{simulationStatus}</div>}
         </Panel>
       </>}

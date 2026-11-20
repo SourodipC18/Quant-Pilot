@@ -1,3 +1,6 @@
+import { PROVIDER_LABELS, type ProviderId } from './market-instruments'
+
+export const researchSourceLabel = (provider?: ProviderId) => PROVIDER_LABELS[provider ?? 'twelvedata']
 export const researchMethods = ['regimes', 'factors', 'forecast', 'scenarios'] as const
 export type ResearchMethod = typeof researchMethods[number]
 export const methodInfo = {
@@ -18,7 +21,7 @@ export type EvidenceChart = { title: string; unit: 'percent'; series: [string, s
 export type EvidenceTable = { caption: string; headers: string[]; rows: string[][] }
 export type ResearchEvidence = {
   id: string; method: ResearchMethod; title: string; createdAt: string; from: string; to: string; sample: number;
-  sources: { symbol: string; currency: string; syncedAt: string; first: string; last: string }[];
+  sources: { symbol: string; currency: string; provider?: ProviderId; syncedAt: string; first: string; last: string }[];
   facts: EvidenceFact[]; assumptions: string[]; limitations: string[]; warnings: string[]; charts: EvidenceChart[];
   tables: EvidenceTable[];
   references?: { label: string; url: string }[];
