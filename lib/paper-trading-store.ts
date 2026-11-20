@@ -5,7 +5,10 @@ import { db } from './db'
 import { paperAccounts, paperCashLedger, paperEquitySnapshots, paperExecutions, paperPositions } from './db/schema'
 import { applyFill, dollarsNumber, estimateOrder, marketValue, PaperError, priceNumber, sharesNumber, STARTING_CASH, type PaperCosts, type PaperMode, type PaperSide } from './paper-trading-math'
 import { getPaperClose, paperQuote, type VerifiedClose } from './paper-trading-prices'
-import type { PaperAccount, PaperFill, PaperPortfolio, PaperReview } from './paper-trading-types'
+import type { PaperAccount, PaperBasketResult, PaperBasketReview, PaperComparison, PaperFill, PaperPortfolio, PaperReview } from './paper-trading-types'
+import { allocationError, type Allocation } from './sample-portfolios'
+import { parseOrderAmount } from './paper-trading-math'
+import { sizePaperBasket } from './paper-basket'
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type Account = typeof paperAccounts.$inferSelect
@@ -27,12 +30,22 @@ function signature(userId: string, payload: string) {
   return createHmac('sha256', secret).update('paper-trading-review/v1\0').update(userId).update('\0').update(payload).digest()
 }
 
-function readTicket(userId: string, ticket: string): Ticket {
+const basketSchema = z.object({
+  kind: z.literal('basket'), accountId: z.uuidv4(), cashCents: z.string().regex(/^\d+$/), expiresAt: z.number(),
+  commissionBps: z.number(), slippageBps: z.number(), orders: z.array(reviewSchema.extend({ side: z.literal('buy'), mode: z.literal('dollars') })).min(3).max(8),
+})
+
+function sealTicket(userId: string, review: unknown) {
+  const payload = Buffer.from(JSON.stringify(review)).toString('base64url')
+  return `${payload}.${signature(userId, payload).toString('base64url')}`
+}
+
+function readTicket<T>(userId: string, ticket: string, schema: z.ZodType<T>): T {
   const [payload, mac, extra] = ticket.split('.')
   if (!payload || !mac || extra !== undefined || !/^[\w-]+$/.test(payload) || !/^[\w-]{43}$/.test(mac)) throw new PaperError('Invalid order review. Review the order again.', 400)
   const supplied = Buffer.from(mac, 'base64url')
   if (supplied.length !== 32 || !timingSafeEqual(signature(userId, payload), supplied)) throw new PaperError('Invalid order review for this workspace.', 403)
-  try { return reviewSchema.parse(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))) }
+  try { return schema.parse(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))) }
   catch { throw new PaperError('Invalid order review. Review the order again.', 400) }
 }
 
@@ -121,39 +134,113 @@ export async function reviewPaperOrder(userId: string, order: OrderInput): Promi
       ...order, symbol: close.symbol, date: close.date, priceMicros: String(close.priceMicros), expiresAt,
       commissionBps: account.commissionBps, slippageBps: account.slippageBps, orderId: crypto.randomUUID(),
     }
-    const payload = Buffer.from(JSON.stringify(review)).toString('base64url')
     return {
-      ticket: `${payload}.${signature(userId, payload).toString('base64url')}`, expiresAt, side: order.side,
+      ticket: sealTicket(userId, review), expiresAt, side: order.side,
       shares: sharesNumber(est.units), fillPrice: priceNumber(est.fillMicros), notional: dollarsNumber(est.notionalCents),
       commission: dollarsNumber(est.commissionCents), cashChange: dollarsNumber(est.deltaCents), quote: paperQuote(close),
     }
   })
 }
 
+function validateReview(account: Account, order: { expiresAt: number } & PaperCosts) {
+  if (Date.now() >= order.expiresAt) throw new PaperError('This price review expired. Review the order again.', 409)
+  if (account.commissionBps !== order.commissionBps || account.slippageBps !== order.slippageBps) throw new PaperError('Trading costs changed. Review the order again.', 409)
+}
+
+async function executeLockedFill(tx: Tx, account: Account, order: Ticket) {
+  const userId = account.userId
+  const referenceMicros = BigInt(order.priceMicros)
+  const est = estimateOrder(order.side, order.mode, order.amount, referenceMicros, account)
+  const position = await livePosition(tx, account, order.symbol)
+  if (position && position.markDate > order.date) throw new PaperError('A newer close is available. Review the order again.', 409)
+  const next = applyFill(account.cashCents, position, order.side, est)
+  const owned = { userId, accountId: account.id }
+  const positionFilter = and(scope(paperPositions, account), eq(paperPositions.symbol, order.symbol))
+  if (next.position.units === 0n) await tx.delete(paperPositions).where(positionFilter)
+  else if (position) await tx.update(paperPositions).set({ ...next.position, markDate: order.date, markMicros: referenceMicros }).where(positionFilter)
+  else await tx.insert(paperPositions).values({ ...owned, symbol: order.symbol, ...next.position, markDate: order.date, markMicros: referenceMicros })
+  const [updated] = await tx.update(paperAccounts).set({ cashCents: next.cashCents, realizedCents: account.realizedCents + (next.realizedCents ?? 0n) }).where(accountScope(account)).returning()
+  const { units, fillMicros, notionalCents, commissionCents, deltaCents } = est
+  const [execution] = await tx.insert(paperExecutions).values({ ...owned, id: order.orderId, symbol: order.symbol, side: order.side, units, referenceMicros, fillMicros, notionalCents, commissionCents, slippageBps: order.slippageBps, realizedCents: next.realizedCents, markDate: order.date }).returning()
+  await tx.insert(paperCashLedger).values({ ...owned, id: order.orderId, kind: 'fill', deltaCents, cashCents: next.cashCents })
+  return { account: updated, execution: fill(execution) }
+}
+
 export function confirmPaperOrder(userId: string, ticket: string) {
-  const order = readTicket(userId, ticket)
+  const order = readTicket(userId, ticket, reviewSchema)
   return withAccount(userId, async (tx, account) => {
     requireGeneration(account, order.accountId)
     const [existing] = await tx.select().from(paperExecutions).where(orderScope(account, order.orderId))
     if (existing) return fill(existing)
-    if (Date.now() >= order.expiresAt) throw new PaperError('This price review expired. Review the order again.', 409)
-    if (account.commissionBps !== order.commissionBps || account.slippageBps !== order.slippageBps) throw new PaperError('Trading costs changed. Review the order again.', 409)
-    const referenceMicros = BigInt(order.priceMicros)
-    const est = estimateOrder(order.side, order.mode, order.amount, referenceMicros, account)
-    const position = await livePosition(tx, account, order.symbol)
-    if (position && position.markDate > order.date) throw new PaperError('A newer close is available. Review the order again.', 409)
-    const next = applyFill(account.cashCents, position, order.side, est)
-    const owned = { userId, accountId: account.id }
-    const positionFilter = and(scope(paperPositions, account), eq(paperPositions.symbol, order.symbol))
-    if (next.position.units === 0n) await tx.delete(paperPositions).where(positionFilter)
-    else if (position) await tx.update(paperPositions).set({ ...next.position, markDate: order.date, markMicros: referenceMicros }).where(positionFilter)
-    else await tx.insert(paperPositions).values({ ...owned, symbol: order.symbol, ...next.position, markDate: order.date, markMicros: referenceMicros })
-    const [updated] = await tx.update(paperAccounts).set({ cashCents: next.cashCents, realizedCents: account.realizedCents + (next.realizedCents ?? 0n) }).where(accountScope(account)).returning()
-    const { units, fillMicros, notionalCents, commissionCents, deltaCents } = est
-    const [execution] = await tx.insert(paperExecutions).values({ ...owned, id: order.orderId, symbol: order.symbol, side: order.side, units, referenceMicros, fillMicros, notionalCents, commissionCents, slippageBps: order.slippageBps, realizedCents: next.realizedCents, markDate: order.date }).returning()
-    await tx.insert(paperCashLedger).values({ ...owned, id: order.orderId, kind: 'fill', deltaCents, cashCents: next.cashCents })
-    await recordSnapshot(tx, updated, await listPositions(tx, updated))
-    return fill(execution)
+    validateReview(account, order)
+    const executed = await executeLockedFill(tx, account, order)
+    await recordSnapshot(tx, executed.account, await listPositions(tx, executed.account))
+    return executed.execution
+  })
+}
+
+export const loadPaperComparison = (userId: string): Promise<PaperComparison | null> => db.transaction(async tx => {
+  const [account] = await tx.select().from(paperAccounts).where(eq(paperAccounts.userId, userId)).for('share')
+  if (!account) return null
+  const positions = await listPositions(tx, account)
+  const invested = accountTotals(positions).marketValue
+  return { accountId: account.id, cash: dollarsNumber(account.cashCents), equity: dollarsNumber(account.cashCents + invested), investedValue: dollarsNumber(invested), positions: positions.map(position => ({ symbol: position.symbol, marketValue: dollarsNumber(marketValue(position.units, position.markMicros)), markDate: position.markDate })) }
+})
+
+export async function reviewPaperBasket(userId: string, accountId: string, budget: string, allocations: Allocation[]): Promise<PaperBasketReview> {
+  const invalid = allocationError('USD', allocations)
+  if (invalid) throw new PaperError(invalid)
+  const budgetCents = parseOrderAmount(budget, 'dollars')
+  const [existing] = await db.select().from(paperAccounts).where(eq(paperAccounts.userId, userId))
+  if (!existing) throw new PaperError('Open Paper Trading to initialize the simulator first.', 409)
+  requireGeneration(existing, accountId)
+  if (budgetCents > existing.cashCents) throw new PaperError('The basket budget exceeds current buying power.', 409)
+  const closes = await Promise.all(allocations.map(async ({ symbol }) => {
+    try { return await getPaperClose(symbol) }
+    catch (error) { throw new PaperError(`${symbol}: ${error instanceof Error ? error.message : 'No verified close is available.'}`, 422) }
+  }))
+  return db.transaction(async tx => {
+    const [account] = await tx.select().from(paperAccounts).where(eq(paperAccounts.userId, userId)).for('share')
+    if (!account) throw new PaperError('Open Paper Trading to initialize the simulator first.', 409)
+    requireGeneration(account, accountId)
+    const sized = sizePaperBasket(allocations, closes, budgetCents, account.cashCents, account)
+    const positions = await listPositions(tx, account)
+    if (closes.some(close => positions.some(position => position.symbol === close.symbol && position.markDate > close.date))) throw new PaperError('A newer close is required for one or more holdings.', 409)
+    const expiresAt = Date.now() + 90_000
+    const { commissionBps, slippageBps } = account
+    const signed = { kind: 'basket' as const, accountId, cashCents: String(account.cashCents), expiresAt, commissionBps, slippageBps, orders: sized.legs.map(({ close, amount }) => ({
+      side: 'buy' as const, mode: 'dollars' as const, amount, accountId, orderId: crypto.randomUUID(), symbol: close.symbol,
+      date: close.date, priceMicros: String(close.priceMicros), expiresAt, commissionBps, slippageBps,
+    })) }
+    return {
+      ticket: sealTicket(userId, signed), expiresAt, budget: dollarsNumber(budgetCents), totalDebit: dollarsNumber(sized.total), commission: dollarsNumber(sized.commission), slippage: dollarsNumber(sized.slippage), remainingCash: dollarsNumber(sized.remaining),
+      orders: sized.legs.map(({ close, estimate }) => ({ quote: paperQuote(close), shares: sharesNumber(estimate.units), fillPrice: priceNumber(estimate.fillMicros), notional: dollarsNumber(estimate.notionalCents), commission: dollarsNumber(estimate.commissionCents), cashChange: dollarsNumber(estimate.deltaCents) })),
+    }
+  })
+}
+
+export function confirmPaperBasket(userId: string, ticket: string): Promise<PaperBasketResult> {
+  const basket = readTicket(userId, ticket, basketSchema)
+  return withAccount(userId, async (tx, account) => {
+    requireGeneration(account, basket.accountId)
+    const existing: PaperFill[] = []
+    for (const order of basket.orders) {
+      const [row] = await tx.select().from(paperExecutions).where(orderScope(account, order.orderId))
+      if (row) existing.push(fill(row))
+    }
+    if (existing.length === basket.orders.length) return { fills: existing }
+    if (existing.length) throw new PaperError('This basket cannot be repeated. Check your paper trade history.', 409)
+    validateReview(account, basket)
+    if (account.cashCents !== BigInt(basket.cashCents)) throw new PaperError('Your available cash changed. Review the basket again.', 409)
+    let current = account
+    const fills = []
+    for (const order of basket.orders) {
+      const executed = await executeLockedFill(tx, current, order)
+      current = executed.account
+      fills.push(executed.execution)
+    }
+    await recordSnapshot(tx, current, await listPositions(tx, current))
+    return { fills }
   })
 }
 

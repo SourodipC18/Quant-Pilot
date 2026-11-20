@@ -80,7 +80,7 @@ function makeHistogram(values: number[], count = 12) {
   return bins.map(bin => ({ ...bin, bin: `${(bin.midpoint * 100).toFixed(1)}%` }))
 }
 
-export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading, historyError, range, setRange, activeTab, onActiveTabChange }: { symbol: string; currency?: string; bars: NumericBar[]; config: BacktestConfig; loading: boolean; historyError: string; range: string; setRange: (value: string) => void; activeTab: AnalyticsTab; onActiveTabChange: (tab: AnalyticsTab) => void }) {
+export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading, historyError, range, setRange, activeTab, onActiveTabChange, sampleReturns }: { symbol: string; currency?: string; bars: NumericBar[]; config: BacktestConfig; loading: boolean; historyError: string; range: string; setRange: (value: string) => void; activeTab: AnalyticsTab; onActiveTabChange: (tab: AnalyticsTab) => void; sampleReturns?: number[] }) {
   const money = (value: number | null | undefined, digits = 0) => priceLabel(value, currency, digits)
   const [commissionBps, setCommissionBps] = useState(config.commissionBps)
   const [slippageBps, setSlippageBps] = useState(config.slippageBps)
@@ -117,14 +117,14 @@ export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading,
   const drawdowns = useMemo(() => drawdownPath(costResult.equity), [costResult.equity])
   const recovery = useMemo(() => recoveryStats(costResult.equity), [costResult.equity])
   const historyReturns = useMemo(() => strategyReturns.filter(Number.isFinite), [strategyReturns])
-  const simulationReturns = useMemo(() => (simulationSource === 'price' ? dailyReturns(pricedBars) : historyReturns).filter(value => value > -1), [simulationSource, pricedBars, historyReturns])
+  const simulationReturns = useMemo(() => (sampleReturns ?? (simulationSource === 'price' ? dailyReturns(pricedBars) : historyReturns)).filter(value => value > -1), [sampleReturns, simulationSource, pricedBars, historyReturns])
   const simulationStatus = loading ? `Loading daily prices for ${symbol}…`
     : historyError && !pricedBars.length ? `Could not load daily prices for ${symbol}. ${historyError}`
     : !Number.isInteger(simulationDays) || simulationDays < 20 || simulationDays > 504 ? 'Enter a horizon of 20 to 504 sessions.'
     : !Number.isInteger(simulationPaths) || simulationPaths < 100 || simulationPaths > 2000 ? 'Enter a path count of 100 to 2,000.'
     : !Number.isInteger(simulationSeed) || simulationSeed < 1 || simulationSeed > 2147483647 ? 'Enter a whole-number seed from 1 to 2,147,483,647.'
-    : !Number.isFinite(capital) || capital < 100 || capital > 100000000 ? 'Enter starting capital between $100 and $100,000,000.'
-    : simulationReturns.length < 20 ? simulationSource === 'strategy'
+    : !Number.isFinite(capital) || capital < 100 || capital > 100000000 ? `Enter starting capital between ${money(100)} and ${money(100000000)}.`
+    : simulationReturns.length < 20 ? sampleReturns ? 'The portfolio needs at least 20 overlapping daily returns. Check coverage or select another sample.' : simulationSource === 'strategy'
       ? 'At least 20 strategy returns are needed after indicator warm-up. Try a longer history range or switch to daily price returns.'
       : `${symbol} needs at least 20 daily price returns. Try a longer history range.`
     : null
@@ -164,7 +164,7 @@ export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading,
   return <div className="advanced-analytics" aria-label={`${symbol} advanced analytics`}>
     <div className="analytics-toolbar panel">
       <div><span className="eyebrow">Quant research suite · {symbol}</span><strong>Configurable model diagnostics</strong><small>Change assumptions to recalculate every related chart and estimate.</small></div>
-      <div className="analytics-source"><span className="status-dot" />{pricedBars.length.toLocaleString()} daily observations<span className="toolbar-divider" />{costResult.trades.length} closed trades<span className="toolbar-divider" /><div className="range-tabs" role="group" aria-label="Analytics history range">{['1M', '3M', '6M', '1Y', '3Y', 'All'].map(value => <button type="button" key={value} aria-pressed={range === value} onClick={() => setRange(value)} className={range === value ? 'active' : ''}>{value}</button>)}</div></div>
+      <div className="analytics-source"><span className="status-dot" />{sampleReturns ? `${sampleReturns.length} aligned portfolio returns · ${currency}` : <>{pricedBars.length.toLocaleString()} daily observations<span className="toolbar-divider" />{costResult.trades.length} closed trades<span className="toolbar-divider" /><div className="range-tabs" role="group" aria-label="Analytics history range">{['1M', '3M', '6M', '1Y', '3Y', 'All'].map(value => <button type="button" key={value} aria-pressed={range === value} onClick={() => setRange(value)} className={range === value ? 'active' : ''}>{value}</button>)}</div></>}</div>
     </div>
     <div className="analytics-tabs" role="tablist" aria-label="Advanced analytics modules">{analyticsTabs.map(({ label, icon: Icon, description }) => <button id={`analytics-tab-${label.replaceAll(' ', '-').replace('&', 'and').toLowerCase()}`} aria-controls="analytics-panel" aria-selected={activeTab === label} role="tab" type="button" key={label} className={activeTab === label ? 'active' : ''} onClick={() => onActiveTabChange(label)} title={description}><Icon aria-hidden="true" />{label}</button>)}</div>
     {activeTab !== 'Monte Carlo' && !canCalculate && <div className="analytics-notice panel" role="status"><CircleHelp aria-hidden="true" /><span>{loading ? 'Loading provider-sourced price history…' : 'At least 60 daily observations are needed for stable, comparable analytics.'}</span></div>}
@@ -187,15 +187,15 @@ export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading,
         <Panel title="Held-out fold performance" eyebrow="No test-period parameter selection"><ChartContainer config={chartConfig} className="advanced-chart"><BarChart data={folds.map((fold, index) => ({ ...fold, fold: `Fold ${index + 1}`, oos: (fold.outOfSampleReturn ?? 0) * 100 }))} accessibilityLayer><CartesianGrid vertical={false} strokeDasharray="3 3" /><XAxis dataKey="fold" tickLine={false} axisLine={false} /><YAxis tickLine={false} axisLine={false} tickFormatter={value => `${Number(value).toFixed(0)}%`} /><ChartTooltip content={<ChartTooltipContent formatter={value => `${number(Number(value))}%`} />} /><Bar dataKey="oos" name="Held-out return" fill="var(--color-strategy)" radius={[3, 3, 0, 0]} /></BarChart></ChartContainer><div className="table-scroll"><table className="data-table"><thead><tr><th>Fold</th><th>Training period</th><th>Held-out period</th><th>Selected windows</th><th>Train Sharpe</th><th>OOS return</th></tr></thead><tbody>{folds.map((fold, index) => <tr key={`${fold.testStart}-${index}`}><td>{index + 1}</td><td>{fold.trainStart.slice(0, 10)} → {fold.trainEnd.slice(0, 10)}</td><td>{fold.testStart.slice(0, 10)} → {fold.testEnd.slice(0, 10)}</td><td>{fold.fastWindow} / {fold.slowWindow}</td><td>{number(fold.trainingSharpe)}</td><td className={(fold.outOfSampleReturn ?? 0) >= 0 ? 'positive' : 'negative'}>{percent(fold.outOfSampleReturn)}</td></tr>)}</tbody></table>{!folds.length && <div className="chart-placeholder">Increase history or reduce the training window to create validation folds.</div>}</div></Panel>
       </>}
       {activeTab === 'Monte Carlo' && <>
-        <Panel title="Bootstrap design" eyebrow={`${symbol} · ${range} history`}>
+        <Panel title="Bootstrap design" eyebrow={sampleReturns ? 'Sample target weights · aligned daily history' : `${symbol} · ${range} history`}>
           <FieldGroup className="analytics-control-grid">
-            <Field className="analytics-field">
+            {!sampleReturns && <Field className="analytics-field">
               <FieldLabel htmlFor="simulation-source">Return source</FieldLabel>
               <select id="simulation-source" value={simulationSource} onChange={event => setSimulationSource(event.target.value === 'strategy' ? 'strategy' : 'price')}>
                 <option value="price">Daily price returns</option>
                 <option value="strategy">Net strategy returns</option>
               </select>
-            </Field>
+            </Field>}
             <NumberField id="simulation-days" label="Projection horizon" value={simulationDays} min={20} max={504} suffix="sessions" onChange={setSimulationDays} />
             <NumberField id="simulation-paths" label="Simulation paths" value={simulationPaths} min={100} max={2000} onChange={setSimulationPaths} />
             <NumberField id="simulation-seed" label="Random seed" value={simulationSeed} min={1} max={2147483647} onChange={setSimulationSeed} />
@@ -208,7 +208,7 @@ export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading,
             <span>Probability below start <strong>{percent(simulations.probabilityOfLoss)}</strong></span>
             <span>5th percentile max drawdown <strong className="negative">{percent(simulations.maxDrawdownP05)}</strong></span>
           </div>}
-          <p className="method-note">{simulationSource === 'price' ? 'Daily price returns model buy-and-hold before trading costs.' : 'Net strategy returns include configured trading costs and sessions spent in cash.'} The model samples daily returns independently, with replacement. The same ticker, history, seed, and settings reproduce the same paths. The results are illustrative, not forecasts.</p>
+          <p className="method-note">{sampleReturns ? 'Aligned daily returns use the sample’s target weights, rebalanced daily without trading costs.' : simulationSource === 'price' ? 'Daily price returns model buy-and-hold before trading costs.' : 'Net strategy returns include configured trading costs and sessions spent in cash.'} The model samples daily returns independently, with replacement. The same history, seed, and settings reproduce the same paths. The results are illustrative, not forecasts.</p>
         </Panel>
         <Panel title={`${symbol} Monte Carlo trajectory cloud`} eyebrow={simulations ? `${Math.min(simulations.trajectories.length, simulationDensity)} shown of ${number(simulations.paths, 0)} paths · ${simulations.steps} sessions · ${number(simulationReturns.length, 0)} historical returns` : 'Simulation results'}>
           {simulations ? <>

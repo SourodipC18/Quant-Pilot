@@ -38,7 +38,7 @@ function ResultsTable({ caption, points, symbols }: { caption: string; points: L
   </div>
 }
 
-export function OptimizationResults({ result, cap, window, dark, sources, oldestFetch }: { result: LabResult; cap: number; window: string; dark: boolean; sources: string; oldestFetch?: string }) {
+export function OptimizationResults({ result, cap, window, dark, sources, oldestFetch, sampleTarget }: { result: LabResult; cap: number; window: string; dark: boolean; sources: string; oldestFetch?: string; sampleTarget?: boolean }) {
   const [hover, setHover] = useState<LabPoint | null>(null)
   const [selected, setSelected] = useState('minimum')
   const [reset, setReset] = useState(0)
@@ -50,9 +50,10 @@ export function OptimizationResults({ result, cap, window, dark, sources, oldest
   const visiblePoint = hover ?? points.find(point => point.id === selected) ?? result.minimum
   const hasPlot = points.some(point => point.sharpe != null)
   const chartPoints = [...result.frontier, ...result.candidates]
-  const currentNote = result.current
-    ? `The current portfolio uses saved shares valued at the common ${result.valuationDate} close, without applying the candidate weight cap.`
-    : 'The current portfolio is shown only when the selection covers all saved holdings with positive shares.'
+  const currentNote = sampleTarget
+    ? result.current ? 'Current portfolio shows the illustrative target weights, without applying the candidate weight cap.' : 'The target-weight point is shown when the selection includes every sample holding.'
+    : result.current ? `The current portfolio uses saved shares valued at the common ${result.valuationDate} close, without applying the candidate weight cap.`
+      : 'The current portfolio is shown only when the selection covers all saved holdings with positive shares.'
 
   return <>
     <section className="panel app-panel" aria-labelledby="optimization-frontier-title">

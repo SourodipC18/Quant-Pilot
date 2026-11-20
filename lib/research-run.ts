@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { PROVIDER_LABELS, providerForSymbol, symbolParts, SYMBOL_PATTERN, type ProviderId } from './market-instruments'
 import { marketDataProvider, validateHistory, type ProviderHistory } from './market-data'
 import { displayPercent as pct, methodInfo, type EvidenceChart, type ResearchEvidence } from './research-evidence'
+import { allocationError, SAMPLE_HISTORY_SIZE } from './sample-portfolios'
+import { readSampleHistory } from './sample-analytics'
 import { alignDailyReturns, bootstrapScenarios, evaluateForecast, fitFactors, marketRegimes, quantile, REGIME_LABELS, type PriceObservation } from './research-methods'
 
 const symbol = z.string().trim().toUpperCase().regex(SYMBOL_PATTERN)
@@ -11,7 +13,7 @@ export const researchInput = z.discriminatedUnion('method', [
   z.object({ method: z.literal('regimes'), symbol, lookback }),
   z.object({ method: z.literal('factors'), symbols: z.array(symbol).min(1).max(3), lookback }),
   z.object({ method: z.literal('forecast'), symbol, lookback, horizon: z.number().refine(value => [1, 5, 10, 20].includes(value)) }),
-  z.object({ method: z.literal('scenarios'), symbols: z.array(symbol).min(1).max(5), lookback, horizon: z.number().int().min(5).max(252), paths: z.number().int().min(100).max(4000), seed: z.number().int().min(0).max(4294967295), block: z.number().int().min(1).max(20) }),
+  z.object({ method: z.literal('scenarios'), symbols: z.array(symbol).min(1).max(8), weightsBps: z.array(z.number().int().min(1).max(10_000)).min(3).max(8).optional(), lookback, horizon: z.number().int().min(5).max(252), paths: z.number().int().min(100).max(4000), seed: z.number().int().min(0).max(4294967295), block: z.number().int().min(1).max(20) }),
 ])
 export type ResearchInput = z.input<typeof researchInput>
 export class ResearchUnavailable extends Error {}
@@ -39,12 +41,22 @@ export async function runResearch(input: ResearchInput, history = marketDataProv
   if (new Set(symbols).size !== symbols.length) throw new ResearchUnavailable('Enter each portfolio symbol only once.')
   if (input.method === 'scenarios' && input.block > input.horizon) throw new ResearchUnavailable('Block length cannot be longer than the simulation horizon.')
   const indian = symbols.every(ticker => providerForSymbol(ticker) === 'upstox')
+  const sampleCurrency = indian ? 'INR' : 'USD'
+  const sampleWeights = input.method === 'scenarios' ? input.weightsBps : undefined
+  if (sampleWeights) {
+    if (sampleWeights.length !== symbols.length) throw new ResearchUnavailable('Each sample holding requires exactly one target weight.')
+    const invalid = allocationError(sampleCurrency, symbols.map((symbol, index) => ({ symbol, weightBps: sampleWeights[index] })))
+    if (invalid) throw new ResearchUnavailable(invalid)
+  } else if (input.method === 'scenarios' && symbols.length > 5) throw new ResearchUnavailable('Enter up to five symbols or choose a weighted sample portfolio.')
   const definitions = indian ? indiaProxyDefinitions : proxyDefinitions
   const proxies = definitions.map(proxy => proxy.symbol)
   const proxyTickers = proxies.map(ticker => symbolParts(ticker).symbol)
   if (input.method === 'factors' && symbols.some(ticker => proxyTickers.includes(symbolParts(ticker).symbol))) throw new ResearchUnavailable(`Choose targets other than ${proxyTickers.join(', ')} to keep the selected ETFs separate from the target.`)
   const requested = input.method === 'factors' ? [...symbols, ...proxies] : symbols
-  const histories: ProviderHistory[] = await Promise.all(requested.map(ticker => history({ symbol: ticker, interval: '1day', adjustment: providerForSymbol(ticker) === 'upstox' ? 'none' : 'splits', outputsize: input.lookback + 1 })))
+  const histories: ProviderHistory[] = await Promise.all(requested.map(ticker => history({ symbol: ticker, interval: '1day', adjustment: providerForSymbol(ticker) === 'upstox' ? 'none' : 'splits', outputsize: sampleWeights ? Math.max(SAMPLE_HISTORY_SIZE, input.lookback + 1) : input.lookback + 1 })))
+  const verifiedSample = sampleWeights ? histories.map((entry, index) => readSampleHistory(symbols[index], sampleCurrency, entry)) : undefined
+  const missingSample = verifiedSample?.find(entry => entry.coverage.error)
+  if (missingSample) throw new ResearchUnavailable(`${missingSample.coverage.symbol}: ${missingSample.coverage.error}`)
   const warnings: string[] = []
   const source = histories.map((entry, index) => {
     const ticker = requested[index], currency = typeof entry.meta?.currency === 'string' && /^[A-Z]{3}$/.test(entry.meta.currency) ? entry.meta.currency : null
@@ -62,8 +74,14 @@ export async function runResearch(input: ResearchInput, history = marketDataProv
   })
   if (source.some(item => item.currency !== source[0].currency) || input.method === 'factors' && source[0].currency !== (indian ? 'INR' : 'USD')) throw new ResearchUnavailable('Series and factor proxies must share the same verified currency. FX conversion is not applied.')
   const providerNames = [...new Set(source.map(item => PROVIDER_LABELS[item.provider]))].join(', ')
-  const series: PriceObservation[][] = histories.map(entry => entry.values.map(bar => ({ date: bar.datetime, close: Number(bar.close) })))
-  const { rows, dropped } = alignDailyReturns(series)
+  const series: PriceObservation[][] = verifiedSample ? verifiedSample.map(entry => entry.points.slice(-(input.lookback + 1)).map(point => ({ date: point.datetime, close: point.close }))) : histories.map(entry => entry.values.map(bar => ({ date: bar.datetime, close: Number(bar.close) })))
+  const aligned = alignDailyReturns(series)
+  let longGaps = 0
+  const rows = sampleWeights ? aligned.rows.flatMap(row => {
+    if (Date.parse(row.date) - Date.parse(row.from) > 7 * 86_400_000) { longGaps++; return [] }
+    return [{ ...row, segment: row.segment + longGaps }]
+  }) : aligned.rows
+  const dropped = aligned.dropped + aligned.rows.length - rows.length
   if (!rows.length) throw new ResearchUnavailable('There is not enough overlapping daily history to run this analysis.')
   if (dropped) warnings.push(`${dropped} unmatched or invalid daily intervals were excluded. No prices were carried forward.`)
   const report: ResearchEvidence = {
@@ -119,14 +137,15 @@ export async function runResearch(input: ResearchInput, history = marketDataProv
     report.tables.push({ caption: 'Out-of-sample forecast errors', headers: ['Model', 'MAE', 'RMSE'], rows: [['Moving average', pct(result.mae), pct(result.rmse)], ['No change', pct(result.naiveMae), pct(result.naiveRmse)]] })
     report.charts.push({ title: 'Non-overlapping held-out returns (observed vs model)', series: ['Observed', 'Moving average'], unit: 'percent', points: narrow(result.estimates).map(point => ({ label: point.date, primary: asPercent(point.actual), secondary: asPercent(point.model) })) })
   } else {
-    const simulated = bootstrapScenarios(rows, symbols.map(() => 1 / symbols.length), input)
+    const simulated = bootstrapScenarios(rows, sampleWeights ? sampleWeights.map(weight => weight / 10_000) : symbols.map(() => 1 / symbols.length), input)
     if (!simulated) throw new ResearchUnavailable('Bootstrap needs at least 40 aligned returns and 20 eligible blocks. Try a shorter block or longer lookback.')
     evidence('loss', 'Paths ending in loss', pct(simulated.probabilityLoss))
     evidence('terminal', 'Median terminal return', pct(quantile(simulated.terminal, 0.5)))
     evidence('drawdown', '90th percentile maximum drawdown', pct(quantile(simulated.drawdown, 0.9)))
     evidence('blocks', 'Eligible historical starts', String(simulated.availableBlocks), 'Calculated metric')
     report.assumptions.push(`${input.block === 1 ? 'Independent daily draws' : `Moving blocks of ${input.block} consecutive observations`}; ${input.horizon} observations per path; ${input.paths} paths; seed ${input.seed}.`)
-    if (symbols.length > 1) report.assumptions.push('Each draw resamples all assets together on matched dates, preserving contemporaneous dependence. The hypothetical portfolio is equal-weighted and rebalanced daily.')
+    if (symbols.length > 1) report.assumptions.push(`Each draw resamples all assets together on matched dates, preserving contemporaneous dependence. The hypothetical portfolio is rebalanced daily to ${sampleWeights ? 'its target weights' : 'equal weights'}.`)
+    if (sampleWeights) report.tables.push({ caption: 'Illustrative target allocation', headers: ['Instrument', 'Target weight'], rows: symbols.map((ticker, index) => [ticker, pct(sampleWeights[index] / 10_000)]) })
     report.limitations.push('A distribution of historical resampling scenarios, not a forecast or a guaranteed probability of future loss. Possible market behavior absent from the historical window is not modeled.')
     report.tables.push({ caption: 'Simulated distributions', headers: ['Percentile', 'Terminal return', 'Maximum drawdown'], rows: [0.05, 0.5, 0.9, 0.95].map(q => [pct(q, 0), pct(quantile(simulated.terminal, q)), pct(quantile(simulated.drawdown, q))]) })
     report.charts.push(distribution(simulated.terminal, 'Terminal return distribution', 'Terminal return'), distribution(simulated.drawdown, 'Maximum drawdown distribution', 'Maximum drawdown'))

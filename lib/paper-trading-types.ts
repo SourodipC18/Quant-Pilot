@@ -16,6 +16,13 @@ export type PaperAccount = Omit<PaperPortfolio, 'positions'> & {
   positions: (PaperHolding & { mark: number; markDate: string; marketValue: number; unrealized: number })[];
   trades: PaperFill[]; history: { date: string; equity: number; realized: number; unrealized: number; pnl: number }[];
 }
+export type PaperComparison = { accountId: string; cash: number; equity: number; investedValue: number; positions: { symbol: string; marketValue: number; markDate: string }[] }
+export type PaperBasketReview = {
+  ticket: string; expiresAt: number; budget: number; totalDebit: number; commission: number; slippage: number; remainingCash: number;
+  orders: Omit<PaperReview, 'ticket' | 'expiresAt' | 'side'>[];
+}
+export type PaperBasketResult = { fills: PaperFill[] }
+
 export type PaperReview = {
   ticket: string; expiresAt: number; side: PaperSide; shares: number; fillPrice: number;
   notional: number; commission: number; cashChange: number; quote: PaperQuote;

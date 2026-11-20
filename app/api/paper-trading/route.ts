@@ -4,7 +4,7 @@ import { MarketDataError } from '@/lib/market-data'
 import { SYMBOL_PATTERN } from '@/lib/market-instruments'
 import { PaperError, parseOrderAmount } from '@/lib/paper-trading-math'
 import { getPaperClose, paperQuote } from '@/lib/paper-trading-prices'
-import { confirmPaperOrder, exportPaperTrades, loadPaperAccount, loadPaperPortfolio, refreshPaperMarks, resetPaperAccount, reviewPaperOrder, updatePaperCosts } from '@/lib/paper-trading-store'
+import { confirmPaperBasket, confirmPaperOrder, exportPaperTrades, loadPaperAccount, loadPaperComparison, loadPaperPortfolio, refreshPaperMarks, resetPaperAccount, reviewPaperBasket, reviewPaperOrder, updatePaperCosts } from '@/lib/paper-trading-store'
 import { guestWorkspaceEnabled, resolveWorkspaceIdentity } from '@/lib/workspace-access'
 
 export const runtime = 'nodejs'
@@ -15,6 +15,8 @@ const bps = z.number().int().min(0).max(100)
 const input = z.discriminatedUnion('action', [
   z.object({ action: z.literal('review'), accountId, symbol, side: z.enum(['buy', 'sell']), mode: z.enum(['shares', 'dollars']), amount: z.string().trim().max(18) }),
   z.object({ action: z.literal('confirm'), ticket: z.string().min(1).max(2000) }),
+  z.object({ action: z.literal('basket.review'), accountId, budget: z.string().trim().max(18), currency: z.literal('USD'), allocations: z.array(z.object({ symbol, weightBps: z.number().int().min(1).max(10_000) })).min(3).max(8) }),
+  z.object({ action: z.literal('basket.confirm'), ticket: z.string().min(1).max(8000) }),
   z.object({ action: z.literal('costs'), accountId, commissionBps: bps, slippageBps: bps }),
   z.object({ action: z.literal('reset'), accountId, confirmation: z.literal('RESET') }),
   z.object({ action: z.literal('refresh'), accountId }),
@@ -40,6 +42,7 @@ export async function GET(request: NextRequest) {
     const action = request.nextUrl.searchParams.get('action') ?? 'account'
     if (action === 'account') return respond(await loadPaperAccount(userId))
     if (action === 'portfolio') return respond(await loadPaperPortfolio(userId))
+    if (action === 'comparison') return respond({ account: await loadPaperComparison(userId) })
     if (action === 'quote') {
       const parsed = symbol.safeParse(request.nextUrl.searchParams.get('symbol'))
       if (!parsed.success) return respond({ error: 'Select a valid symbol.' }, 400)
@@ -65,6 +68,8 @@ export async function POST(request: NextRequest) {
       return respond(await reviewPaperOrder(userId, { accountId, symbol, side, mode, amount }))
     }
     if (data.action === 'confirm') return respond(await confirmPaperOrder(userId, data.ticket))
+    if (data.action === 'basket.review') return respond(await reviewPaperBasket(userId, data.accountId, data.budget, data.allocations))
+    if (data.action === 'basket.confirm') return respond(await confirmPaperBasket(userId, data.ticket))
     if (data.action === 'refresh') return respond(await refreshPaperMarks(userId, data.accountId))
     if (data.action === 'reset') await resetPaperAccount(userId, data.accountId)
     if (data.action === 'costs') await updatePaperCosts(userId, data.accountId, { commissionBps: data.commissionBps, slippageBps: data.slippageBps })

@@ -2,10 +2,11 @@ import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import '@/components/paper-trading.css'
+import '@/components/sample-portfolios.css'
 
 export const metadata: Metadata = {
   title: { default: 'QuantPilot — Quantitative Research Terminal', template: '%s · QuantPilot' },
-  description: 'Research global markets, test systematic strategies, analyze portfolio risk, and simulate US stock and ETF trades in a private quantitative workspace.',
+  description: 'Preview illustrative US and Indian portfolios, study historical portfolio risk, and simulate US stock and ETF trades in QuantPilot’s research terminal.',
   generator: 'v0.app',
   icons: {
     icon: [
