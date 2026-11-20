@@ -38,7 +38,7 @@ function ResultsTable({ caption, points, symbols }: { caption: string; points: L
   </div>
 }
 
-export function OptimizationResults({ result, cap, window, dark, sources, oldestFetch }: { result: LabResult; cap: number; window: string; dark: boolean; sources: string; oldestFetch?: string }) {
+export function OptimizationResults({ result, cap, window, dark, sources, oldestFetch, sampleTarget }: { result: LabResult; cap: number; window: string; dark: boolean; sources: string; oldestFetch?: string; sampleTarget?: boolean }) {
   const [hover, setHover] = useState<LabPoint | null>(null)
   const [selected, setSelected] = useState('minimum')
   const [reset, setReset] = useState(0)
@@ -50,9 +50,10 @@ export function OptimizationResults({ result, cap, window, dark, sources, oldest
   const visiblePoint = hover ?? points.find(point => point.id === selected) ?? result.minimum
   const hasPlot = points.some(point => point.sharpe != null)
   const chartPoints = [...result.frontier, ...result.candidates]
-  const currentNote = result.current
-    ? `The current portfolio uses saved shares valued at the common ${result.valuationDate} close, without applying the candidate weight cap.`
-    : 'The current portfolio is shown only when the selection covers all saved holdings with positive shares.'
+  const currentNote = sampleTarget
+    ? result.current ? 'Current portfolio shows the illustrative target weights, without applying the candidate weight cap.' : 'The target-weight point is shown when the selection includes every sample holding.'
+    : result.current ? `The current portfolio uses saved shares valued at the common ${result.valuationDate} close, without applying the candidate weight cap.`
+      : 'The current portfolio is shown only when the selection covers all saved holdings with positive shares.'
 
   return <>
     <section className="panel app-panel" aria-labelledby="optimization-frontier-title">
@@ -83,7 +84,7 @@ export function OptimizationResults({ result, cap, window, dark, sources, oldest
       <details><summary>Frontier and candidate allocations ({chartPoints.length})</summary><ResultsTable caption="Displayed feasible and frontier portfolios" points={chartPoints} symbols={result.symbols} /></details>
       <div className="optimization-method">
         <h3>Method & limitations</h3>
-        <p>Source: {sources || 'market data provider'}. {oldestFetch && `Oldest provider fetch: ${oldestFetch}. `}Uses aligned weekday split-adjusted closes, arithmetic mean returns and sample covariance, annualized over 252 trading days. Sharpe assumes a 0% risk-free rate. {result.skippedIntervals > 0 && `${result.skippedIntervals} date intervals were omitted because a close was missing or a gap was too long. `}No forward-filling, FX conversion, dividends, fees, or taxes.</p>
+        <p>Source: {sources || 'market data provider'}. {oldestFetch && `Oldest provider fetch: ${oldestFetch}. `}Uses aligned weekday closes (Twelve Data split-adjusted; Upstox as reported), arithmetic mean returns and sample covariance, annualized over 252 trading days. Sharpe assumes a 0% risk-free rate. {result.skippedIntervals > 0 && `${result.skippedIntervals} date intervals were omitted because a close was missing or a gap was too long. `}No forward-filling, FX conversion, dividends, fees, or taxes.</p>
         <p>Long-only, fully invested portfolios were searched on a {result.step}-percentage-point starting grid and adjusted to respect the {cap}% per-asset cap. {result.searched.toLocaleString()} distinct allocations were evaluated; the chart and table show a sample plus the best grid results, not exact continuous optima. Portfolios with undefined Sharpe are table-only. Historical estimates do not guarantee future performance.</p>
       </div>
     </section>

@@ -3,6 +3,7 @@
 import { useId, useMemo } from 'react'
 import { Area, CartesianGrid, ComposedChart, Line, usePlotArea, useXAxisScale, useYAxisScale, XAxis, YAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
+import { priceLabel } from '@/lib/market-instruments'
 import type { MonteCarloResult } from '@/lib/analytics'
 
 const chartConfig = {
@@ -55,18 +56,17 @@ function TrajectoryCloud({ paths, capital }: { paths: number[][]; capital: numbe
   </g>
 }
 
-export function MonteCarloChart({ simulation, density, capital, fullRange }: { simulation: MonteCarloResult; density: number; capital: number; fullRange: boolean }) {
+export function MonteCarloChart({ currency, simulation, density, capital, fullRange }: { currency?: string; simulation: MonteCarloResult; density: number; capital: number; fullRange: boolean }) {
   const paths = useMemo(() => simulation.trajectories.slice(0, density), [simulation.trajectories, density])
   const data = useMemo(() => simulation.fan.map(point => ({ ...point, interval: [point.p05, point.p95] })), [simulation.fan])
   const domain = useMemo(() => getChartDomain(simulation.fan, paths, capital, fullRange), [simulation.fan, paths, capital, fullRange])
   const tickFormat = useMemo(() => {
     const span = domain[1] - domain[0]
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency', currency: 'USD', notation: span >= 100_000 ? 'compact' : 'standard',
+    return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : undefined, {
+      ...(currency ? { style: 'currency', currency, minimumFractionDigits: 0 } : {}), notation: span >= 100_000 ? 'compact' : 'standard',
       maximumFractionDigits: span < 50 || span >= 100_000 ? 2 : 0,
     })
-  }, [domain])
-  const equityFormat = useMemo(() => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }), [])
+  }, [currency, domain])
 
   return <>
     <div className="simulation-chart-legend" aria-label="Monte Carlo chart legend">
@@ -85,7 +85,7 @@ export function MonteCarloChart({ simulation, density, capital, fullRange }: { s
           itemSorter={item => item.dataKey === 'p05' ? 0 : item.dataKey === 'median' ? 1 : 2}
           content={<ChartTooltipContent
             labelFormatter={(_, payload) => `Session ${payload[0]?.payload?.step ?? '—'}`}
-            formatter={(value, name) => <div className="flex w-full justify-between gap-4"><span className="text-muted-foreground">{name}</span><span className="font-mono tabular-nums">{equityFormat.format(Number(value))}</span></div>}
+            formatter={(value, name) => <div className="flex w-full justify-between gap-4"><span className="text-muted-foreground">{name}</span><span className="font-mono tabular-nums">{priceLabel(Number(value), currency)}</span></div>}
           />}
         />
         <Area dataKey="interval" stroke="none" fill="var(--color-p95)" fillOpacity={0.24} tooltipType="none" isAnimationActive={false} />

@@ -1,17 +1,21 @@
 import { and, desc, eq } from 'drizzle-orm'
 import { NextResponse, type NextRequest } from 'next/server'
 import { z } from 'zod'
+import { SYMBOL_PATTERN } from '@/lib/market-instruments'
 import { db } from '@/lib/db'
 import { backtestRuns, experiments, portfolioHoldings, portfolios, savedStrategies, watchlistItems } from '@/lib/db/schema'
-import { guestCookieName, guestWorkspaceEnabled } from '@/lib/workspace-access'
+import { guestCookieName, guestWorkspaceEnabled, resolveWorkspaceIdentity } from '@/lib/workspace-access'
+import { marketDataProvider, classifyProviderFailure } from '@/lib/market-data'
+import { allocationError, sampleAdjustment, SAMPLE_CAPITAL, SAMPLE_HISTORY_SIZE } from '@/lib/sample-portfolios'
+import { readSampleHistory, sampleAnalytics } from '@/lib/sample-analytics'
 
 export const runtime = 'nodejs'
-const guestKeySchema = z.uuidv4()
-const symbolSchema = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9._:/-]+$/)
+const symbolSchema = z.string().trim().max(65).regex(SYMBOL_PATTERN)
 const jsonSchema = z.record(z.string(), z.unknown())
 const inputSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('watchlist.add'), symbol: symbolSchema, companyName: z.string().trim().min(1).max(160) }),
   z.object({ type: z.literal('portfolio.create'), name: z.string().trim().min(1).max(80), benchmark: symbolSchema.optional() }),
+  z.object({ type: z.literal('portfolio.saveSample'), name: z.string().trim().min(1).max(80), currency: z.enum(['USD', 'INR']), allocations: z.array(z.object({ symbol: symbolSchema.transform(value => value.toUpperCase()), weightBps: z.number().int().min(1).max(10_000) })).min(3).max(8) }),
   z.object({ type: z.literal('holding.save'), portfolioId: z.string().uuid(), symbol: symbolSchema, shares: z.number().finite().positive().max(1e12), averageCost: z.number().finite().positive().max(1e12).nullable().optional() }),
   z.object({ type: z.literal('strategy.save'), name: z.string().trim().min(1).max(80), description: z.string().trim().max(300).default(''), config: jsonSchema }),
   z.object({ type: z.literal('backtest.save'), name: z.string().trim().min(1).max(80), symbol: symbolSchema, benchmark: symbolSchema.nullable().optional(), config: jsonSchema, metrics: jsonSchema, equity: z.array(jsonSchema).max(5000), trades: z.array(jsonSchema).max(5000) }),
@@ -20,14 +24,8 @@ const inputSchema = z.discriminatedUnion('type', [
 const deleteSchema = z.object({ type: z.enum(['watchlist', 'portfolio', 'holding', 'strategy', 'backtest', 'experiment']), id: z.string().uuid() })
 
 async function getUserId(request: NextRequest) {
-  if (guestWorkspaceEnabled) {
-    const guestKey = guestKeySchema.safeParse(request.cookies.get(guestCookieName)?.value)
-    return guestKey.success ? `guest:${guestKey.data}` : null
-  }
-
-  const { auth } = await import('@/lib/auth')
-  const session = await auth.api.getSession({ headers: request.headers })
-  return session?.user?.id ?? null
+  const identity = await resolveWorkspaceIdentity(request)
+  return identity ? identity.kind === 'guest' ? `guest:${identity.id}` : identity.id : null
 }
 
 function workspaceAccessError(action: string) {
@@ -86,6 +84,26 @@ export async function POST(request: NextRequest) {
       await db.insert(watchlistItems).values({ id: crypto.randomUUID(), userId, symbol: data.symbol.toUpperCase(), companyName: data.companyName }).onConflictDoNothing()
     } else if (data.type === 'portfolio.create') {
       const [portfolio] = await db.insert(portfolios).values({ id: crypto.randomUUID(), userId, name: data.name, benchmark: data.benchmark?.toUpperCase() ?? 'SPY' }).returning()
+      return NextResponse.json({ portfolio }, { status: 201 })
+    } else if (data.type === 'portfolio.saveSample') {
+      const invalid = allocationError(data.currency, data.allocations)
+      if (invalid) return NextResponse.json({ error: invalid }, { status: 422 })
+      let history
+      try {
+        history = await Promise.all(data.allocations.map(async ({ symbol }) => readSampleHistory(symbol, data.currency, await marketDataProvider.history({ symbol, interval: '1day', outputsize: SAMPLE_HISTORY_SIZE, adjustment: sampleAdjustment(symbol) }))))
+      } catch (error) {
+        const problem = classifyProviderFailure(error)
+        return NextResponse.json({ error: problem.message }, { status: problem.httpStatus })
+      }
+      const analytics = sampleAnalytics(data.allocations, data.currency, history, SAMPLE_CAPITAL[data.currency])
+      if (!analytics || analytics.positions.some(position => position.shares < 1e-8 || position.shares > 1e12)) {
+        return NextResponse.json({ error: 'Every instrument needs a verified close on the same date to save a share-based snapshot.' }, { status: 422 })
+      }
+      const portfolio = await db.transaction(async tx => {
+        const [created] = await tx.insert(portfolios).values({ id: crypto.randomUUID(), userId, name: data.name, benchmark: data.currency === 'INR' ? 'NIFTY:NSE' : 'SPY' }).returning()
+        await tx.insert(portfolioHoldings).values(analytics.positions.map(position => ({ id: crypto.randomUUID(), userId, portfolioId: created.id, symbol: position.symbol, shares: position.shares.toFixed(8), averageCost: null })))
+        return created
+      })
       return NextResponse.json({ portfolio }, { status: 201 })
     } else if (data.type === 'holding.save') {
       const [ownedPortfolio] = await db.select({ id: portfolios.id }).from(portfolios).where(and(eq(portfolios.id, data.portfolioId), eq(portfolios.userId, userId))).limit(1)

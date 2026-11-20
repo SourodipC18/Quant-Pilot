@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
-import type { EvidenceChart, ResearchEvidence } from './research-evidence'
+import { researchSourceLabel, type EvidenceChart, type ResearchEvidence } from './research-evidence'
 
 const pageWidth = 595, pageHeight = 842, margin = 42, contentWidth = pageWidth - margin * 2
 const ink = rgb(0.1, 0.16, 0.14), muted = rgb(0.30, 0.36, 0.34), rule = rgb(0.84, 0.88, 0.86)
@@ -105,7 +105,7 @@ export async function renderResearchPdf(report: ResearchEvidence) {
   for (const detail of report.tables) { heading(detail.caption); table(detail.headers, detail.rows) }
   report.charts.forEach(chart)
   heading('Source provenance')
-  for (const source of report.sources) block(`${source.symbol} (${source.currency}) | Twelve Data | ${source.first} to ${source.last} | retrieved ${source.syncedAt}`)
+  for (const source of report.sources) block(`${source.symbol} (${source.currency}) | ${researchSourceLabel(source.provider)} | ${source.first} to ${source.last} | retrieved ${source.syncedAt}`)
   for (const reference of report.references ?? []) block(`ETF issuer: ${reference.label} | ${reference.url}`)
   heading('Assumptions and methodology')
   report.assumptions.forEach(note => block(note))

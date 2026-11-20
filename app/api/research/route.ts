@@ -81,10 +81,7 @@ export async function POST(request: NextRequest) {
     } catch (failure) {
       if (failure instanceof ResearchUnavailable) return error(failure.message, 422)
       const providerError = classifyProviderFailure(failure)
-      if (providerError.httpStatus === 429) return error('Twelve Data rate limit reached. Try again after the provider quota resets.', 429)
-      if (providerError.code === 'NOT_CONFIGURED') return error('Twelve Data is not configured for this workspace.', 503)
-      if (providerError.httpStatus === 400) return error('Twelve Data could not provide the requested history. Check instrument symbols and plan coverage.', 422)
-      return error('Historical prices could not be retrieved. Try again shortly.', 502)
+      return error(providerError.message, providerError.httpStatus)
     }
   }
 

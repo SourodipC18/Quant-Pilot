@@ -73,7 +73,7 @@ function evenlySample<T>(values: T[], limit: number) {
   return Array.from({ length: limit }, (_, index) => values[Math.round(index * (values.length - 1) / (limit - 1))])
 }
 
-export function calculateOptimizationLab(assets: LabAsset[], window: LabWindow, maxWeightPercent: number, currentShares?: number[]): { result: LabResult } | { error: string } {
+export function calculateOptimizationLab(assets: LabAsset[], window: LabWindow, maxWeightPercent: number, currentShares?: number[], targetWeights?: number[]): { result: LabResult } | { error: string } {
   const constraintError = labConstraintError(assets.length, maxWeightPercent)
   if (constraintError) return { error: constraintError }
   const symbols = assets.map(asset => asset.symbol)
@@ -126,7 +126,9 @@ export function calculateOptimizationLab(assets: LabAsset[], window: LabWindow, 
   const values = currentShares?.length === assets.length && currentShares.every(shares => Number.isFinite(shares) && shares > 0)
     ? currentShares.map((shares, index) => shares * aligned.latestCloses[index]) : []
   const totalValue = values.reduce((sum, value) => sum + value, 0)
-  const current = Number.isFinite(totalValue) && totalValue > 0 ? point(values.map(value => value / totalValue), 'current', 'current') : null
+  const weights = targetWeights?.length === assets.length && targetWeights.every(weight => Number.isFinite(weight) && weight > 0) && Math.abs(targetWeights.reduce((sum, value) => sum + value, 0) - 1) < EPSILON ? targetWeights
+    : Number.isFinite(totalValue) && totalValue > 0 ? values.map(value => value / totalValue) : null
+  const current = weights ? point(weights, 'current', 'current') : null
 
   return { result: {
     symbols, currency, start: aligned.start, end: aligned.end, valuationDate: aligned.valuationDate,

@@ -2,7 +2,7 @@
 
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
-import type { EvidenceChart, ResearchEvidence } from '@/lib/research-evidence'
+import { researchSourceLabel, type EvidenceChart, type ResearchEvidence } from '@/lib/research-evidence'
 
 export function ResearchPanel({ eyebrow, title, children }: { eyebrow: string; title: string; children: React.ReactNode }) {
   return <section className="panel app-panel research-panel"><header className="app-panel-header"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2></div></header>{children}</section>
@@ -31,7 +31,7 @@ export function ResearchResults({ report }: { report: ResearchEvidence }) {
       {report.tables.map(table => <div key={table.caption} className="research-table-wrap"><table className="research-table"><caption>{table.caption}</caption><thead><tr>{table.headers.map(header => <th scope="col" key={header}>{header}</th>)}</tr></thead><tbody>{table.rows.map(([label, ...values]) => <tr key={label}><th scope="row">{label}</th>{values.map((value, i) => <td key={i}>{value}</td>)}</tr>)}</tbody></table></div>)}
     </ResearchPanel>
     <ResearchPanel eyebrow="Data & methodology" title="Sources and assumptions">
-      <ul className="research-notes">{report.sources.map(item => <li key={item.symbol}><strong>{item.symbol} · {item.currency}</strong> — Twelve Data, {item.first} to {item.last}. Retrieved <time dateTime={item.syncedAt}>{item.syncedAt}</time>.</li>)}</ul>
+      <ul className="research-notes">{report.sources.map(item => <li key={item.symbol}><strong>{item.symbol} · {item.currency}</strong> — {researchSourceLabel(item.provider)}, {item.first} to {item.last}. Retrieved <time dateTime={item.syncedAt}>{item.syncedAt}</time>.</li>)}</ul>
       {report.references && <p className="research-subtext">ETF issuer references: {report.references.map(({ label, url }, index) => <span key={url}>{index > 0 && ' · '}<a className="underline underline-offset-2" href={url} target="_blank" rel="noreferrer">{label}<span className="sr-only"> (opens in a new tab)</span></a></span>)}</p>}
       <ul className="research-notes">{[...report.assumptions, ...report.limitations].map(note => <li key={note}>{note}</li>)}</ul>
       {report.warnings.length > 0 && <details className="research-warnings"><summary>Data quality notes ({report.warnings.length})</summary><ul className="research-notes">{report.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></details>}
