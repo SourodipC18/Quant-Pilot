@@ -4,10 +4,9 @@ import { z } from 'zod'
 import { SYMBOL_PATTERN } from '@/lib/market-instruments'
 import { db } from '@/lib/db'
 import { backtestRuns, experiments, portfolioHoldings, portfolios, savedStrategies, watchlistItems } from '@/lib/db/schema'
-import { guestCookieName, guestWorkspaceEnabled } from '@/lib/workspace-access'
+import { guestCookieName, guestWorkspaceEnabled, resolveWorkspaceIdentity } from '@/lib/workspace-access'
 
 export const runtime = 'nodejs'
-const guestKeySchema = z.uuidv4()
 const symbolSchema = z.string().trim().max(65).regex(SYMBOL_PATTERN)
 const jsonSchema = z.record(z.string(), z.unknown())
 const inputSchema = z.discriminatedUnion('type', [
@@ -21,14 +20,8 @@ const inputSchema = z.discriminatedUnion('type', [
 const deleteSchema = z.object({ type: z.enum(['watchlist', 'portfolio', 'holding', 'strategy', 'backtest', 'experiment']), id: z.string().uuid() })
 
 async function getUserId(request: NextRequest) {
-  if (guestWorkspaceEnabled) {
-    const guestKey = guestKeySchema.safeParse(request.cookies.get(guestCookieName)?.value)
-    return guestKey.success ? `guest:${guestKey.data}` : null
-  }
-
-  const { auth } = await import('@/lib/auth')
-  const session = await auth.api.getSession({ headers: request.headers })
-  return session?.user?.id ?? null
+  const identity = await resolveWorkspaceIdentity(request)
+  return identity ? identity.kind === 'guest' ? `guest:${identity.id}` : identity.id : null
 }
 
 function workspaceAccessError(action: string) {

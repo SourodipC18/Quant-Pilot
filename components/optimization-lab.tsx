@@ -31,8 +31,8 @@ async function loadHistories([, ...symbols]: HistoryKey) {
   }))
 }
 
-export function OptimizationLab({ portfolios, portfolio, holdings, workspaceError, providerConfigured, dark, onPortfolioChange, onOpenPortfolio }: {
-  portfolios?: Portfolio[]; portfolio?: Portfolio; holdings: Holding[]; workspaceError?: string; providerConfigured?: boolean; dark: boolean
+export function OptimizationLab({ portfolios, portfolio, holdings, workspaceError, paperMode, paperLoading, providerConfigured, dark, onPortfolioChange, onOpenPortfolio }: {
+  portfolios?: Portfolio[]; portfolio?: Portfolio; holdings: Holding[]; workspaceError?: string; paperMode?: boolean; paperLoading?: boolean; providerConfigured?: boolean; dark: boolean
   onPortfolioChange: (id: string) => void; onOpenPortfolio: () => void
 }) {
   return <section className="optimization-lab" aria-label="Portfolio optimization workspace">
@@ -46,12 +46,12 @@ export function OptimizationLab({ portfolios, portfolio, holdings, workspaceErro
       <h2 id="optimization-empty-title">Start with a saved portfolio</h2>
       <p>Add at least two holdings to a portfolio in Portfolio Risk. The lab uses their real daily closing prices; it does not generate example results.</p>
       <button type="button" className="button small" onClick={onOpenPortfolio}>Open Portfolio Risk <ArrowRight size={14} /></button>
-    </section> : <OptimizationSetup key={portfolio.id} {...{ portfolios, portfolio, holdings, providerConfigured, dark, onPortfolioChange, onOpenPortfolio }} />}
+    </section> : <OptimizationSetup key={`${portfolio.id}:${Boolean(paperLoading)}`} {...{ portfolios, portfolio, holdings, paperMode, paperLoading, providerConfigured, dark, onPortfolioChange, onOpenPortfolio }} />}
   </section>
 }
 
-function OptimizationSetup({ portfolios, portfolio, holdings, providerConfigured, dark, onPortfolioChange, onOpenPortfolio }: {
-  portfolios: Portfolio[]; portfolio: Portfolio; holdings: Holding[]; providerConfigured?: boolean; dark: boolean
+function OptimizationSetup({ portfolios, portfolio, holdings, paperMode, paperLoading, providerConfigured, dark, onPortfolioChange, onOpenPortfolio }: {
+  portfolios: Portfolio[]; portfolio: Portfolio; holdings: Holding[]; paperMode?: boolean; paperLoading?: boolean; providerConfigured?: boolean; dark: boolean
   onPortfolioChange: (id: string) => void; onOpenPortfolio: () => void
 }) {
   const eligible = useMemo(() => {
@@ -88,7 +88,7 @@ function OptimizationSetup({ portfolios, portfolio, holdings, providerConfigured
 
   return <>
     <section className="panel app-panel" aria-labelledby="optimization-setup-title">
-      <header className="app-panel-header optimization-header"><div><span className="eyebrow">01 / Research setup</span><h2 id="optimization-setup-title">Portfolio & constraints</h2></div><button type="button" className="text-button" onClick={onOpenPortfolio}>Manage holdings <ArrowRight size={14} /></button></header>
+      <header className="app-panel-header optimization-header"><div><span className="eyebrow">01 / Research setup</span><h2 id="optimization-setup-title">Portfolio & constraints</h2></div><button type="button" className="text-button" onClick={onOpenPortfolio}>{paperMode ? 'Trade positions' : 'Manage holdings'} <ArrowRight size={14} /></button></header>
       <form className="optimization-form" onSubmit={event => {
         event.preventDefault()
         if (constraintError || providerConfigured === false) return
@@ -96,7 +96,7 @@ function OptimizationSetup({ portfolios, portfolio, holdings, providerConfigured
         setRun({ symbols, window, cap: Number(cap) })
       }}>
         <FieldGroup className="optimization-fields">
-          <Field><FieldLabel htmlFor="optimization-portfolio">Saved portfolio</FieldLabel><select id="optimization-portfolio" value={portfolio.id} onChange={event => onPortfolioChange(event.target.value)}>{portfolios.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+          <Field><FieldLabel htmlFor="optimization-portfolio">Portfolio source</FieldLabel><select id="optimization-portfolio" value={portfolio.id} onChange={event => onPortfolioChange(event.target.value)}>{portfolios.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
           <Field><FieldLabel htmlFor="optimization-window">Calculation period</FieldLabel><select id="optimization-window" value={window} onChange={event => setWindow(event.target.value as LabWindow)}>{(Object.keys(LAB_WINDOWS) as LabWindow[]).map(value => <option key={value} value={value}>{windowLabels[value]}</option>)}</select></Field>
           <Field data-invalid={constraintError && symbols.length >= 2 ? true : undefined}><FieldLabel htmlFor="optimization-cap">Max asset weight (%)</FieldLabel><input id="optimization-cap" type="number" min="1" max="100" step="1" required value={cap} onChange={event => setCap(event.target.value)} aria-invalid={Boolean(constraintError && symbols.length >= 2)} aria-describedby="optimization-constraints" /></Field>
         </FieldGroup>
@@ -106,11 +106,11 @@ function OptimizationSetup({ portfolios, portfolio, holdings, providerConfigured
             {allSymbols.length ? allSymbols.map(symbol => <label key={symbol} className="optimization-asset">
               <input type="checkbox" checked={symbols.includes(symbol)} disabled={!symbols.includes(symbol) && symbols.length >= MAX_LAB_ASSETS} onChange={event => setSelected(previous => event.target.checked ? [...previous, symbol] : previous.filter(value => value !== symbol))} />
               <span>{symbol}</span>
-            </label>) : <p>No holdings are saved in this portfolio.</p>}
+            </label>) : <p>{paperLoading ? 'Loading simulated positions…' : paperMode ? 'No simulated holdings are available.' : 'No holdings are saved in this portfolio.'}</p>}
           </div>
         </FieldSet>
         <div className="optimization-form-footer">
-          <p id="optimization-constraints">Long-only · Fully invested · No leverage or cash.<br />{allSymbols.length < 2 ? 'Add at least two holdings in Portfolio Risk.' : constraintError ?? 'Pick up to eight holdings in the same quote currency.'}</p>
+          <p id="optimization-constraints">Long-only · Fully invested · No leverage. Idle cash is excluded from all weights.<br />{paperLoading ? 'Waiting for simulated positions.' : allSymbols.length < 2 ? paperMode ? 'Hold at least two instruments in Paper Trading.' : 'Add at least two holdings in Portfolio Risk.' : constraintError ?? 'Pick up to eight holdings in the same quote currency.'}</p>
           <button type="submit" className="button primary" disabled={Boolean(constraintError) || isLoading || providerConfigured === false}><Play size={14} aria-hidden="true" /> {isLoading ? 'Loading history…' : 'Run optimization'}</button>
         </div>
       </form>
