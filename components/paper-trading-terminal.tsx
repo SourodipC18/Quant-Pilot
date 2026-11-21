@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
 import { Activity, FlaskConical, Search, ShieldCheck } from 'lucide-react'
 import { instrumentSymbol, symbolParts, type Instrument } from '@/lib/market-instruments'
-import { eligiblePaperType, type PaperAccount, type PaperQuote } from '@/lib/paper-trading-types'
+import { eligiblePaperType, tradingPriceTime, type PaperAccount, type PaperQuote } from '@/lib/paper-trading-types'
 import { PaperAccountPanels, PaperAccountStrip } from './paper-account-panels'
 import { paperEndpoint, paperPortfolioEndpoint, paperRequest, PaperOrderTicket, usd } from './paper-order-ticket'
 import { PaperPriceChart } from './paper-trading-charts'
@@ -17,7 +17,9 @@ type MarketHistory = { values: { datetime: string; close: string }[]; meta?: { c
 
 export function PaperTradingTerminal({ workspaceReady, workspaceError, onRetryWorkspace }: { workspaceReady: boolean; workspaceError?: string; onRetryWorkspace: () => void }) {
   const { mutate } = useSWRConfig()
-  const { data: account, error: accountError, mutate: reloadAccount } = useSWR<PaperAccount>(workspaceReady ? paperEndpoint : null, paperRequest, swrOptions)
+  const { data: account, error: accountError, mutate: reloadAccount } = useSWR<PaperAccount>(workspaceReady ? paperEndpoint : null, paperRequest, {
+    ...swrOptions, revalidateOnFocus: true, refreshInterval: data => data?.positions.length ? 300_000 : 0,
+  })
   const [instrument, setInstrument] = useState(startingInstrument)
   const [query, setQuery] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
@@ -32,10 +34,10 @@ export function PaperTradingTerminal({ workspaceReady, workspaceError, onRetryWo
   const { data: search, isLoading: searching, error: searchError } = useSWR<{ data: Instrument[]; warnings?: string[] }>(queryKey, paperRequest, swrOptions)
   const candidates = [...new Map((search?.data ?? []).filter(row => row.source === 'twelvedata' && row.currency === 'USD' && row.country === 'United States' && eligiblePaperType(row.instrument_type)).map(row => [instrumentSymbol(row), row])).values()].slice(0, 8)
   const quoteKey = workspaceReady ? `${paperEndpoint}?action=quote&symbol=${encodeURIComponent(symbol)}` : null
-  const { data: quote, isLoading: quoteLoading, error: quoteError, mutate: reloadQuote } = useSWR<PaperQuote>(quoteKey, paperRequest, { ...swrOptions, dedupingInterval: 30_000 })
+  const { data: quote, isLoading: quoteLoading, error: quoteError, mutate: reloadQuote } = useSWR<PaperQuote>(quoteKey, paperRequest, { ...swrOptions, revalidateOnFocus: true, refreshInterval: 300_000, dedupingInterval: 30_000 })
   const historyKey = `/api/market?action=history&symbol=${encodeURIComponent(quote?.symbol ?? symbol)}&interval=1day&outputsize=260&adjust=none`
   const { data: history, isLoading: historyLoading, error: historyError, mutate: reloadChart } = useSWR<MarketHistory>(quote ? historyKey : null, paperRequest, { ...swrOptions, dedupingInterval: 300_000 })
-  const values = useMemo(() => history?.meta?.currency === 'USD' ? history.values.filter(row => quote && row.datetime <= quote.date).map(row => ({ datetime: row.datetime, close: Number(row.close) })).filter(row => row.close > 0 && Number.isFinite(row.close)).slice(-windows[range]) : [], [history, quote, range])
+  const values = useMemo(() => history?.meta?.currency === 'USD' ? history.values.filter(row => quote && (row.datetime < quote.date.slice(0, 10) || quote.freshness === 'End-of-day' && row.datetime === quote.date)).map(row => ({ datetime: row.datetime, close: Number(row.close) })).filter(row => row.close > 0 && Number.isFinite(row.close)).slice(-windows[range]) : [], [history, quote, range])
   const workspaceIssue = workspaceError ?? accountError?.message
 
   async function onUpdate() { await Promise.all([reloadAccount(), mutate(paperPortfolioEndpoint)]) }
@@ -43,10 +45,10 @@ export function PaperTradingTerminal({ workspaceReady, workspaceError, onRetryWo
   function openPosition(row: string) { select({ symbol: row, instrument_name: symbolParts(row).symbol, exchange: symbolParts(row).exchange, currency: 'USD' }); document.getElementById('paper-market')?.scrollIntoView({ block: 'nearest' }) }
   function showPositions() { setView('positions'); document.getElementById('paper-activity')?.scrollIntoView({ block: 'start' }) }
 
-  return <div className="paper-terminal" aria-label="Paper trading terminal">
+  return <div className="paper-terminal" aria-label="Trading terminal">
     <div className="paper-mode-banner"><span className="paper-sim"><FlaskConical size={14} aria-hidden="true" /> SIMULATION MODE</span><p>Trade with virtual USD. No orders are sent to a broker.</p><span className="paper-mode-exchange"><ShieldCheck size={14} aria-hidden="true" /> US stocks &amp; ETFs</span></div>
     <PaperAccountStrip account={account} positionsSelected={view === 'positions'} onSelectPositions={showPositions} />
-    {workspaceIssue ? <div className="panel app-panel paper-problem" role="alert"><p>{workspaceIssue}</p><button className="button small" type="button" onClick={workspaceError ? onRetryWorkspace : () => void reloadAccount()}>Retry account</button></div> : !account && <p className="paper-note" role="status">Opening your paper account…</p>}
+    {workspaceIssue ? <div className="panel app-panel paper-problem" role="alert"><p>{workspaceIssue}</p><button className="button small" type="button" onClick={workspaceError ? onRetryWorkspace : () => void reloadAccount()}>Retry account</button></div> : !account && <p className="paper-note" role="status">Opening your account…</p>}
     <div className="paper-terminal-grid">
       <section className="panel app-panel paper-market" id="paper-market" aria-labelledby="paper-market-title">
         <header className="app-panel-header paper-market-header"><div><span className="eyebrow">01 / Market workspace</span><h2 id="paper-market-title">Market chart</h2></div><div className="instrument-search paper-search"><Search size={14} aria-hidden="true" /><input aria-label="Search USD stocks and ETFs" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search symbol" maxLength={80} autoComplete="off" onKeyDown={event => { if (event.key === 'Escape') setQuery('') }} />
@@ -54,7 +56,7 @@ export function PaperTradingTerminal({ workspaceReady, workspaceError, onRetryWo
         </div></header>
         <div className="paper-instrument-row"><div className="instrument-current"><span className="ticker-badge">{symbolParts(symbol).symbol}</span><div><strong>{instrument.instrument_name}</strong><small>{instrument.exchange} · USD</small></div></div><div className="paper-inline paper-periods" role="group" aria-label="Chart range">{(Object.keys(windows) as (keyof typeof windows)[]).map(item => <button type="button" className="button small" key={item} aria-pressed={range === item} onClick={() => setRange(item)}>{item}</button>)}</div></div>
         <div className="paper-market-price"><strong>{usd(quote?.price, 4)}</strong><span className="paper-tag paper-freshness"><Activity size={12} aria-hidden="true" /> {quote?.freshness ?? (quoteLoading ? 'Verifying price' : 'Price unavailable')}</span></div>
-        <p className="paper-note paper-source">Twelve Data{quote ? ` · ${quote.date} close · Not live` : ' · Verified closing price required'}{quoteError ? <button className="text-button" type="button" onClick={() => void reloadQuote()}>Retry price</button> : historyError ? <button className="text-button" type="button" onClick={() => void reloadChart()}>Retry chart</button> : null}</p>
+        <p className="paper-note paper-source">Twelve Data{quote ? ` · ${tradingPriceTime(quote.date)} · Not streaming` : ' · Verified price required'}{quoteError ? <button className="text-button" type="button" onClick={() => void reloadQuote()}>Retry price</button> : historyError ? <button className="text-button" type="button" onClick={() => void reloadChart()}>Retry chart</button> : null}</p>
         {quoteError || historyError ? <div className="paper-plot-state" role="alert">{quoteError?.message ?? historyError?.message}</div> : quoteLoading || historyLoading || !workspaceReady && !workspaceError ? <div className="paper-plot-state" role="status">Loading market history…</div> : values.length ? <PaperPriceChart values={values} /> : <div className="paper-plot-state">No verified USD chart history is available.</div>}
         <p className="paper-note">Unadjusted daily closes. Current-session prices are excluded until after the session.</p>
       </section>

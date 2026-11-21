@@ -26,13 +26,13 @@ function respond(data: unknown, status = 200) { return NextResponse.json(data, {
 function problem(error: unknown) {
   if (error instanceof PaperError) return respond({ error: error.message }, error.status)
   if (error instanceof MarketDataError) return respond({ error: `${error.message} No simulated fill was made.` }, error.httpStatus)
-  console.error('Paper trading request failed', error instanceof Error ? error.name : 'Unknown error')
-  return respond({ error: 'Paper trading is temporarily unavailable. Try again shortly.' }, 503)
+  console.error('Trading request failed', error instanceof Error ? error.name : 'Unknown error')
+  return respond({ error: 'Trading is temporarily unavailable. Try again shortly.' }, 503)
 }
 
 async function userIdFor(request: NextRequest) {
   const identity = await resolveWorkspaceIdentity(request)
-  if (!identity) throw new PaperError(guestWorkspaceEnabled ? 'Open your workspace first and allow workspace cookies.' : 'Sign in to use paper trading.', guestWorkspaceEnabled ? 409 : 401)
+  if (!identity) throw new PaperError(guestWorkspaceEnabled ? 'Open your workspace first and allow workspace cookies.' : 'Sign in to use trading.', guestWorkspaceEnabled ? 409 : 401)
   return `${identity.kind}:${identity.id}`
 }
 
@@ -48,8 +48,8 @@ export async function GET(request: NextRequest) {
       if (!parsed.success) return respond({ error: 'Select a valid symbol.' }, 400)
       return respond(paperQuote(await getPaperClose(parsed.data)))
     }
-    if (action === 'csv') return new Response(await exportPaperTrades(userId), { headers: { ...headers, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="quantpilot-paper-trades.csv"' } })
-    return respond({ error: 'Unsupported paper trading action.' }, 400)
+    if (action === 'csv') return new Response(await exportPaperTrades(userId), { headers: { ...headers, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="quantpilot-trades.csv"' } })
+    return respond({ error: 'Unsupported trading action.' }, 400)
   } catch (error) { return problem(error) }
 }
 

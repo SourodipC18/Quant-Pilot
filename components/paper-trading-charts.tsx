@@ -39,7 +39,7 @@ export function PaperEquityHistory({ history }: { history: PaperAccount['history
       <button type="button" className="button small" aria-pressed={mode === 'pnl'} onClick={() => setMode('pnl')}>Profit &amp; loss</button>
     </div>
     {history.length === 1 && <p className="paper-note">Only the opening balance is recorded. Fills and updated position marks add points to this chart.</p>}
-    <ChartContainer config={config} className="h-52 w-full" aria-label={mode === 'equity' ? 'Paper account equity history' : 'Paper account profit and loss history'}>
+    <ChartContainer config={config} className="h-52 w-full" aria-label={mode === 'equity' ? 'Account equity history' : 'Account profit and loss history'}>
       <LineChart accessibilityLayer data={history} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
         <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
         <XAxis dataKey="date" tickFormatter={history.length > 1 && history[0].date.slice(0, 10) === history.at(-1)?.date.slice(0, 10) ? value => shortTime.format(new Date(value)) : short} minTickGap={25} tickMargin={8} {...axis} />

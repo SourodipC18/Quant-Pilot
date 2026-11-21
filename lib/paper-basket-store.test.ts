@@ -2,7 +2,7 @@ import { vi, beforeEach, afterEach, describe, it, expect } from 'vitest'
 import { getTableName, type Table, type SQL } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { STARTING_CASH } from './paper-trading-math'
-import { confirmPaperBasket, loadPaperComparison, reviewPaperBasket } from './paper-trading-store'
+import { confirmPaperBasket, confirmPaperOrder, loadPaperAccount, loadPaperComparison, reviewPaperBasket, reviewPaperOrder } from './paper-trading-store'
 import { SAMPLE_PORTFOLIOS } from './sample-portfolios'
 
 const mocks = vi.hoisted(() => ({ db: { select: vi.fn(), transaction: vi.fn() }, close: vi.fn() }))
@@ -31,9 +31,11 @@ function database(tables: Tables) {
     return values(table).filter(row => columns.every(([, column, index]) => row[aliases[column]] === params[Number(index) - 1]))
   }
   return {
-    select: () => ({ from: (table: Table) => ({ where: (filter: SQL) => {
-      const result = matching(table, filter)
-      return Object.assign(Promise.resolve(result), { for: async () => result, orderBy: async () => result, limit: async (limit: number) => result.slice(0, limit) })
+    select: (fields?: { value: unknown }) => ({ from: (table: Table) => ({ where: (filter: SQL) => {
+      const rows = matching(table, filter)
+      const result = fields ? [{ value: rows.length }] : rows
+      const query = Object.assign(Promise.resolve(result), { for: async () => result, limit: async (limit: number) => result.slice(0, limit) })
+      return Object.assign(query, { orderBy: () => query })
     } }) }),
     insert: (table: Table) => ({ values: (value: Row) => {
       const name = getTableName(table)
@@ -71,6 +73,31 @@ beforeEach(() => {
   })
 })
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks() })
+
+describe('trading account valuation', () => {
+  it('marks a buy to market on account load, records gains and losses, and preserves the last verified price on failure', async () => {
+    const symbol = sample.holdings[0].symbol
+    saved.paper_positions = []
+    Object.assign(saved.paper_accounts[0], { commissionBps: 0, slippageBps: 0 })
+    const review = await reviewPaperOrder(owner, { accountId, symbol, side: 'buy', mode: 'shares', amount: '2' })
+    await confirmPaperOrder(owner, review.ticket)
+    expect(await loadPaperAccount(owner)).toMatchObject({ cash: 4_999_800, unrealized: 0, realized: 0 })
+    expect(saved.paper_equity_snapshots).toHaveLength(1)
+
+    mocks.close.mockResolvedValueOnce({ symbol, date: '2025-11-05T15:00:00.000Z', priceMicros: 110_000_000n })
+    expect(await loadPaperAccount(owner)).toMatchObject({ equity: 5_000_020, unrealized: 20, realized: 0, positions: [{ unrealized: 20, mark: 110, averageCost: 100 }] })
+
+    mocks.close.mockResolvedValueOnce({ symbol, date: '2025-11-05', priceMicros: 95_000_000n })
+    expect(await loadPaperAccount(owner)).toMatchObject({ equity: 4_999_990, unrealized: -10, positions: [{ unrealized: -10, mark: 95 }] })
+    expect(saved.paper_equity_snapshots.map(row => row.unrealizedCents)).toEqual([0n, 2_000n, -1_000n])
+
+    mocks.close.mockResolvedValueOnce({ symbol, date: '2025-11-05T15:05:00.000Z', priceMicros: 105_000_000n })
+    expect(await loadPaperAccount(owner)).toMatchObject({ unrealized: -10, unavailableMarks: 1 })
+    mocks.close.mockRejectedValueOnce(new Error('Market data unavailable'))
+    expect(await loadPaperAccount(owner)).toMatchObject({ unrealized: -10, unavailableMarks: 1 })
+    expect(saved.paper_equity_snapshots).toHaveLength(3)
+  })
+})
 
 describe('paper basket transaction', () => {
   it('compares and reviews without writing, adds to an existing position, and replays a confirmed ticket without duplicate fills', async () => {
