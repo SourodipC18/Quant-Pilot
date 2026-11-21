@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function HomePage({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
   const { view } = await searchParams
-  const initialView = view === 'paper-trading' || view === 'sample-portfolios' ? view : undefined
+  const initialView = view === 'paper-trading' || view === 'trading' ? 'trading' : view === 'sample-portfolios' ? view : undefined
   if (guestWorkspaceEnabled) return <QuantDashboard user={null} initialView={initialView} />
 
   const { auth } = await import('@/lib/auth')

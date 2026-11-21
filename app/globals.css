@@ -235,7 +235,10 @@ h2 { margin: 4px 0 0; font-size: 13px; letter-spacing: -.015em; font-weight: 650
 .quant-shell.dark .button.primary { color: #11160d; }
 .quant-shell.dark .nav-item.selected { color: var(--accent-blue); }
 .quant-shell.dark .quick-module-icon { color: var(--accent-blue); }
-.quant-sidebar { width: 246px; padding: 20px 13px 14px; position: sticky; top: 0; height: 100vh; min-height: 640px; }
+.quant-sidebar { --quant-sidebar-width: 246px; width: var(--quant-sidebar-width); padding: 20px 13px 14px; position: sticky; top: 0; height: 100vh; min-height: 640px; transition: margin-inline-start .18s ease, visibility 0s; }
+.quant-sidebar[data-collapsed="true"] { margin-inline-start: calc(-1 * var(--quant-sidebar-width)); visibility: hidden; transition: margin-inline-start .18s ease, visibility 0s .18s; }
+@media (max-width: 860px) { .quant-sidebar[data-collapsed="true"] { display: none; margin-inline-start: 0; } }
+@media (prefers-reduced-motion: reduce) { .quant-sidebar, .quant-sidebar[data-collapsed="true"] { transition: none; } }
 .quant-sidebar .brand-row { text-decoration: none; color: var(--foreground); gap: 10px; padding: 0 7px 20px; }
 .quant-sidebar .brand-row > span:last-child { display: flex; flex-direction: column; }
 .quant-sidebar .brand-name { display: block; font-size: 15px; }
@@ -258,6 +261,10 @@ h2 { margin: 4px 0 0; font-size: 13px; letter-spacing: -.015em; font-weight: 650
 .profile-menu button { width: 100%; height: 34px; border: 0; border-radius: 5px; background: transparent; color: var(--foreground); display: flex; align-items: center; gap: 8px; padding: 0 9px; text-align: left; font-size: 10px; }
 .profile-menu button:hover { background: var(--surface-raised); }
 .quant-topbar { height: 57px; position: sticky; top: 0; z-index: 4; backdrop-filter: blur(16px); }
+.quant-topbar-start { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.sidebar-toggle { width: 32px; height: 32px; flex: none; border: 1px solid var(--border); background: var(--surface); }
+.sidebar-toggle:hover { border-color: var(--border-strong); }
+.sidebar-toggle:focus-visible { outline-color: var(--accent-blue); }
 .breadcrumb-separator { color: var(--border-strong); }
 .market-state { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
 .market-state i { width: 6px; height: 6px; border-radius: 50%; background: #49b87a; box-shadow: 0 0 0 3px color-mix(in srgb, #49b87a 14%, transparent); }
@@ -265,7 +272,7 @@ h2 { margin: 4px 0 0; font-size: 13px; letter-spacing: -.015em; font-weight: 650
 .quant-content { max-width: 1500px; padding-top: 29px; display: flex; flex-direction: column; gap: 15px; }
 .quant-heading { margin: 0 0 2px; align-items: center; }
 .quant-heading h1 { font-size: 26px; }
-.quant-heading .kicker { margin-bottom: 8px; }
+.quant-heading .kicker { margin-bottom: 8px; flex-wrap: wrap; row-gap: 4px; color: var(--muted); }
 .quant-heading > .button { flex-shrink: 0; }
 .quant-content .panel { border-radius: 9px; }
 .app-panel { min-width: 0; padding: 17px 18px; }

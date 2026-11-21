@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { applyFill, estimateOrder, marketValue, STARTING_CASH } from './paper-trading-math'
-import { assertPaperSymbol, verifiedPaperClose } from './paper-trading-prices'
+import { assertPaperSymbol, markOrder, verifiedIntradayMark, verifiedPaperClose } from './paper-trading-prices'
 import type { ProviderHistory } from './market-data'
 import { PAPER_PORTFOLIO, portfolioHoldingsFor } from './portfolio-adapter'
 
@@ -64,6 +64,22 @@ describe('paper price eligibility', () => {
       expect(() => verifiedPaperClose('AAPL', payload, now)).toThrow('provider must verify')
     }
     expect(() => assertPaperSymbol('RELIANCE:NSE')).toThrow('INR trades')
+  })
+
+  it('uses the latest completed regular-session bar, not an unfinished or stale price', () => {
+    const payload: ProviderHistory = { ...history(), interval: '5min', values: [
+      bar('2026-11-20T14:25:00.000Z', '99'), bar('2026-11-20T15:55:00.000Z', '105'), bar('2026-11-20T16:00:00.000Z', '500'),
+    ] }
+    const now = new Date('2026-11-20T16:02:00Z')
+    expect(verifiedIntradayMark('AAPL:@XNGS', payload, now)).toEqual({ symbol: 'AAPL:@XNGS', date: '2026-11-20T16:00:00.000Z', priceMicros: 105_000_000n })
+    expect(verifiedIntradayMark('AAPL', { ...payload, values: payload.values.slice(0, 1) }, now)).toBeNull()
+    expect(verifiedIntradayMark('AAPL', payload, new Date('2026-11-20T17:00:00Z'))).toBeNull()
+    expect(() => verifiedIntradayMark('AAPL:@XNYS', payload, now)).toThrow('provider must verify')
+  })
+
+  it('orders a verified daily close after its intraday bar and before the next session', () => {
+    expect(markOrder('2026-11-20T21:00:00.000Z') < markOrder('2026-11-20')).toBe(true)
+    expect(markOrder('2026-11-20') < markOrder('2026-11-23T14:35:00.000Z')).toBe(true)
   })
 
   it('maps current paper positions without including idle cash or saved holdings', () => {

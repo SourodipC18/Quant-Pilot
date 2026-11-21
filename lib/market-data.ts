@@ -242,7 +242,7 @@ export class TwelveDataAdapter implements MarketDataProvider {
     const meta = normalizeProviderMetadata((body as { meta?: Record<string, unknown> }).meta)
     assertTwelveListing(input.symbol, meta)
     const result = { values: normalizeHistory(body, input.interval), meta, source: this.id, fetchedAt: new Date().toISOString(), interval: input.interval, adjustment }
-    storeCached(this.historyCache, cacheKey, result, 300_000)
+    storeCached(this.historyCache, cacheKey, result, input.interval === '5min' && !input.endDate ? 60_000 : 300_000)
     return result
   }
 }

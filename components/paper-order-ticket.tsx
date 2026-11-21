@@ -5,7 +5,7 @@ import { ArrowDownLeft, ArrowUpRight, ChevronRight, LockKeyhole } from 'lucide-r
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { estimateOrder, dollarsNumber, sharesNumber, type PaperMode, type PaperSide } from '@/lib/paper-trading-math'
 import { priceLabel } from '@/lib/market-instruments'
-import type { PaperAccount, PaperFill, PaperQuote, PaperReview } from '@/lib/paper-trading-types'
+import { tradingPriceTime, type PaperAccount, type PaperFill, type PaperQuote, type PaperReview } from '@/lib/paper-trading-types'
 
 export const paperEndpoint = '/api/paper-trading'
 export const paperPortfolioEndpoint = `${paperEndpoint}?action=portfolio`
@@ -13,9 +13,9 @@ export const usd = (value?: number | null, digits = 2) => priceLabel(value, 'USD
 export const quantity = (shares: number) => shares.toLocaleString('en-US', { maximumFractionDigits: 6 })
 
 export async function paperRequest<T>(url: string, body?: Record<string, unknown>): Promise<T> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(body?.action === 'refresh' ? 55_000 : 20_000), ...(body && { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) })
+  const response = await fetch(url, { signal: AbortSignal.timeout(body?.action === 'refresh' || !body && url === paperEndpoint ? 55_000 : 20_000), ...(body && { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) })
   const data = await response.json().catch(() => null)
-  if (!response.ok || !data) throw new Error(data?.error ?? 'Paper trading is temporarily unavailable. Try again shortly.')
+  if (!response.ok || !data) throw new Error(data?.error ?? 'Trading is temporarily unavailable. Try again shortly.')
   return data as T
 }
 
@@ -98,7 +98,7 @@ export function PaperOrderTicket({ symbol, account, quote, quoteLoading, onFill 
     </form>
     {review && <PaperDialog id="paper-review-title" busy={busy} onClose={closeReview}>
       <span className="eyebrow">Confirm simulation</span><h2 id="paper-review-title">{review.side === 'buy' ? 'Buy' : 'Sell'} {quantity(review.shares)} {review.quote.symbol.split(':')[0]}</h2>
-      <p className="paper-note">{review.quote.source} · {review.quote.freshness} · {review.quote.date}. This price review is valid for 90 seconds.</p>
+      <p className="paper-note">{review.quote.source} · {review.quote.freshness} · {tradingPriceTime(review.quote.date)}. This price review is valid for 90 seconds.</p>
       <dl className="paper-estimate"><div><dt>Simulated fill price</dt><dd>{usd(review.fillPrice, 6)}</dd></div><div><dt>Order value</dt><dd>{usd(review.notional)}</dd></div><div><dt>Commission</dt><dd>{usd(review.commission)}</dd></div><div><dt>{review.cashChange < 0 ? 'Total cash debit' : 'Net proceeds'}</dt><dd>{usd(Math.abs(review.cashChange))}</dd></div></dl>
       {error && <p className="paper-note negative" role="alert">{error}</p>}
       <div className="paper-inline paper-dialog-actions"><button className="button" type="button" onClick={closeReview} disabled={busy}>Cancel</button><button className="button primary" type="button" disabled={busy} onClick={() => void confirm()}>{busy ? 'Confirming…' : 'Confirm simulated order'}</button></div>

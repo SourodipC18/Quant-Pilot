@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { db } from './db'
 import { paperAccounts, paperCashLedger, paperEquitySnapshots, paperExecutions, paperPositions } from './db/schema'
 import { applyFill, dollarsNumber, estimateOrder, marketValue, PaperError, priceNumber, sharesNumber, STARTING_CASH, type PaperCosts, type PaperMode, type PaperSide } from './paper-trading-math'
-import { getPaperClose, paperQuote, type VerifiedClose } from './paper-trading-prices'
+import { getPaperClose, markOrder, paperQuote, type VerifiedClose } from './paper-trading-prices'
 import type { PaperAccount, PaperBasketResult, PaperBasketReview, PaperComparison, PaperFill, PaperPortfolio, PaperReview } from './paper-trading-types'
 import { allocationError, type Allocation } from './sample-portfolios'
 import { parseOrderAmount } from './paper-trading-math'
@@ -65,7 +65,7 @@ async function withAccount<T>(userId: string, action: (tx: Tx, account: Account)
 }
 
 function requireGeneration(account: Account, id: string) {
-  if (account.id !== id) throw new PaperError('The paper account has changed. Refresh and try again.', 409)
+  if (account.id !== id) throw new PaperError('The account has changed. Refresh and try again.', 409)
 }
 
 function accountTotals(positions: Position[]) {
@@ -95,7 +95,12 @@ export const loadPaperPortfolio = (userId: string): Promise<PaperPortfolio> => w
   return { accountId: account.id, cash: dollarsNumber(account.cashCents), equity: dollarsNumber(account.cashCents + accountTotals(positions).marketValue), positions: holdings(positions) }
 })
 
-export const loadPaperAccount = (userId: string): Promise<PaperAccount> => withAccount(userId, async (tx, account) => {
+export async function loadPaperAccount(userId: string): Promise<PaperAccount> {
+  const pricing = await refreshAccountMarks(userId)
+  return accountSummary(userId, pricing.unavailable)
+}
+
+const accountSummary = (userId: string, unavailableMarks: number): Promise<PaperAccount> => withAccount(userId, async (tx, account) => {
   const positions = await listPositions(tx, account)
   const recent = await listTrades(tx, account).limit(50)
   const [{ value: completedTrades }] = await tx.select({ value: count() }).from(paperExecutions).where(scope(paperExecutions, account))
@@ -108,7 +113,7 @@ export const loadPaperAccount = (userId: string): Promise<PaperAccount> => withA
   return {
     accountId: account.id, startingCash: dollarsNumber(STARTING_CASH), cash: dollarsNumber(account.cashCents), buyingPower: dollarsNumber(account.cashCents),
     equity: dollarsNumber(equity), invested: dollarsNumber(totals.invested), marketValue: dollarsNumber(totals.marketValue),
-    realized: dollarsNumber(account.realizedCents), unrealized: dollarsNumber(totals.marketValue - totals.invested),
+    realized: dollarsNumber(account.realizedCents), unrealized: dollarsNumber(totals.marketValue - totals.invested), unavailableMarks,
     totalReturn: Number(equity - STARTING_CASH) / Number(STARTING_CASH), costs: { commissionBps: account.commissionBps, slippageBps: account.slippageBps }, completedTrades,
     positions: holdings(positions).map((row, i) => {
       const position = positions[i], value = marketValue(position.units, position.markMicros)
@@ -127,7 +132,7 @@ export async function reviewPaperOrder(userId: string, order: OrderInput): Promi
     requireGeneration(account, order.accountId)
     const est = estimateOrder(order.side, order.mode, order.amount, close.priceMicros, account)
     const position = await livePosition(tx, account, close.symbol)
-    if (position && position.markDate > close.date) throw new PaperError('A newer close is required for this position.', 503)
+    if (position && markOrder(position.markDate) > markOrder(close.date)) throw new PaperError('A newer price is required for this position.', 503)
     applyFill(account.cashCents, position, order.side, est)
     const expiresAt = Date.now() + 90_000
     const review: Ticket = {
@@ -152,7 +157,7 @@ async function executeLockedFill(tx: Tx, account: Account, order: Ticket) {
   const referenceMicros = BigInt(order.priceMicros)
   const est = estimateOrder(order.side, order.mode, order.amount, referenceMicros, account)
   const position = await livePosition(tx, account, order.symbol)
-  if (position && position.markDate > order.date) throw new PaperError('A newer close is available. Review the order again.', 409)
+  if (position && markOrder(position.markDate) > markOrder(order.date)) throw new PaperError('A newer price is available. Review the order again.', 409)
   const next = applyFill(account.cashCents, position, order.side, est)
   const owned = { userId, accountId: account.id }
   const positionFilter = and(scope(paperPositions, account), eq(paperPositions.symbol, order.symbol))
@@ -192,20 +197,20 @@ export async function reviewPaperBasket(userId: string, accountId: string, budge
   if (invalid) throw new PaperError(invalid)
   const budgetCents = parseOrderAmount(budget, 'dollars')
   const [existing] = await db.select().from(paperAccounts).where(eq(paperAccounts.userId, userId))
-  if (!existing) throw new PaperError('Open Paper Trading to initialize the simulator first.', 409)
+  if (!existing) throw new PaperError('Open Trading to initialize your account first.', 409)
   requireGeneration(existing, accountId)
   if (budgetCents > existing.cashCents) throw new PaperError('The basket budget exceeds current buying power.', 409)
   const closes = await Promise.all(allocations.map(async ({ symbol }) => {
     try { return await getPaperClose(symbol) }
-    catch (error) { throw new PaperError(`${symbol}: ${error instanceof Error ? error.message : 'No verified close is available.'}`, 422) }
+    catch (error) { throw new PaperError(`${symbol}: ${error instanceof Error ? error.message : 'No verified price is available.'}`, 422) }
   }))
   return db.transaction(async tx => {
     const [account] = await tx.select().from(paperAccounts).where(eq(paperAccounts.userId, userId)).for('share')
-    if (!account) throw new PaperError('Open Paper Trading to initialize the simulator first.', 409)
+    if (!account) throw new PaperError('Open Trading to initialize your account first.', 409)
     requireGeneration(account, accountId)
     const sized = sizePaperBasket(allocations, closes, budgetCents, account.cashCents, account)
     const positions = await listPositions(tx, account)
-    if (closes.some(close => positions.some(position => position.symbol === close.symbol && position.markDate > close.date))) throw new PaperError('A newer close is required for one or more holdings.', 409)
+    if (closes.some(close => positions.some(position => position.symbol === close.symbol && markOrder(position.markDate) > markOrder(close.date)))) throw new PaperError('A newer price is required for one or more holdings.', 409)
     const expiresAt = Date.now() + 90_000
     const { commissionBps, slippageBps } = account
     const signed = { kind: 'basket' as const, accountId, cashCents: String(account.cashCents), expiresAt, commissionBps, slippageBps, orders: sized.legs.map(({ close, amount }) => ({
@@ -229,7 +234,7 @@ export function confirmPaperBasket(userId: string, ticket: string): Promise<Pape
       if (row) existing.push(fill(row))
     }
     if (existing.length === basket.orders.length) return { fills: existing }
-    if (existing.length) throw new PaperError('This basket cannot be repeated. Check your paper trade history.', 409)
+    if (existing.length) throw new PaperError('This basket cannot be repeated. Check your transaction history.', 409)
     validateReview(account, basket)
     if (account.cashCents !== BigInt(basket.cashCents)) throw new PaperError('Your available cash changed. Review the basket again.', 409)
     let current = account
@@ -259,20 +264,27 @@ export const resetPaperAccount = (userId: string, id: string) => withAccount(use
   await recordFunding(tx, reset)
 })
 
-export async function refreshPaperMarks(userId: string, id: string) {
-  const positions = await withAccount(userId, (tx, account) => { requireGeneration(account, id); return listPositions(tx, account) })
+export const refreshPaperMarks = (userId: string, id: string) => refreshAccountMarks(userId, id)
+
+async function refreshAccountMarks(userId: string, expectedId?: string) {
+  const { id, positions } = await withAccount(userId, async (tx, account) => {
+    if (expectedId) requireGeneration(account, expectedId)
+    return { id: account.id, positions: await listPositions(tx, account) }
+  })
+  if (!positions.length) return { updated: 0, unavailable: 0 }
   const closes = new Map<string, VerifiedClose>()
   for (let i = 0; i < positions.length; i += 4) {
     const batch = await Promise.allSettled(positions.slice(i, i + 4).map(position => getPaperClose(position.symbol)))
     for (const result of batch) if (result.status === 'fulfilled') closes.set(result.value.symbol, result.value)
   }
   return withAccount(userId, async (tx, account) => {
-    requireGeneration(account, id)
+    if (expectedId) requireGeneration(account, expectedId)
+    if (id !== account.id) return { updated: 0, unavailable: 0 }
     const current = await listPositions(tx, account)
     let updated = 0, unavailable = 0
     for (const position of current) {
       const close = closes.get(position.symbol)
-      if (!close || close.date < position.markDate) { unavailable++; continue }
+      if (!close || markOrder(close.date) < markOrder(position.markDate)) { unavailable++; continue }
       if (position.markDate === close.date && position.markMicros === close.priceMicros) continue
       await tx.update(paperPositions).set({ markDate: close.date, markMicros: close.priceMicros }).where(and(scope(paperPositions, account), eq(paperPositions.symbol, position.symbol)))
       updated++

@@ -119,7 +119,7 @@ function OptimizationSetup({ sample, portfolios, portfolio, holdings, paperMode,
           </div>
         </FieldSet>
         <div className="optimization-form-footer">
-          <p id="optimization-constraints">Long-only · Fully invested · No leverage. Idle cash is excluded from all weights.<br />{paperLoading ? 'Waiting for simulated positions.' : allSymbols.length < 2 ? paperMode ? 'Hold at least two instruments in Paper Trading.' : 'Add at least two holdings in Portfolio Risk.' : constraintError ?? 'Pick up to eight holdings in the same quote currency.'}</p>
+          <p id="optimization-constraints">Long-only · Fully invested · No leverage. Idle cash is excluded from all weights.<br />{paperLoading ? 'Waiting for simulated positions.' : allSymbols.length < 2 ? paperMode ? 'Hold at least two instruments in Trading.' : 'Add at least two holdings in Portfolio Risk.' : constraintError ?? 'Pick up to eight holdings in the same quote currency.'}</p>
           <button type="submit" className="button primary" disabled={Boolean(constraintError) || isLoading || providerConfigured === false}><Play size={14} aria-hidden="true" /> {isLoading ? 'Loading history…' : 'Run optimization'}</button>
         </div>
       </form>
