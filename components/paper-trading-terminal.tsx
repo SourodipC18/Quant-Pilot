@@ -8,6 +8,7 @@ import { eligiblePaperType, tradingPriceTime, type PaperAccount, type PaperQuote
 import { PaperAccountPanels, PaperAccountStrip } from './paper-account-panels'
 import { paperEndpoint, paperPortfolioEndpoint, paperRequest, PaperOrderTicket, usd } from './paper-order-ticket'
 import { PaperPriceChart } from './paper-trading-charts'
+import { marketCheckTime, marketRetryOptions, useMarketQuote } from './use-market-quote'
 
 const startingInstrument: Instrument = { symbol: 'AAPL', instrument_name: 'Apple Inc.', exchange: 'NASDAQ', currency: 'USD' }
 const swrOptions = { revalidateOnFocus: false, shouldRetryOnError: false }
@@ -18,7 +19,7 @@ type MarketHistory = { values: { datetime: string; close: string }[]; meta?: { c
 export function PaperTradingTerminal({ workspaceReady, workspaceError, onRetryWorkspace }: { workspaceReady: boolean; workspaceError?: string; onRetryWorkspace: () => void }) {
   const { mutate } = useSWRConfig()
   const { data: account, error: accountError, mutate: reloadAccount } = useSWR<PaperAccount>(workspaceReady ? paperEndpoint : null, paperRequest, {
-    ...swrOptions, revalidateOnFocus: true, refreshInterval: data => data?.positions.length ? 300_000 : 0,
+    ...marketRetryOptions, revalidateOnFocus: true, refreshInterval: data => data?.positions.length ? 300_000 : 0,
   })
   const [instrument, setInstrument] = useState(startingInstrument)
   const [query, setQuery] = useState('')
@@ -34,9 +35,11 @@ export function PaperTradingTerminal({ workspaceReady, workspaceError, onRetryWo
   const { data: search, isLoading: searching, error: searchError } = useSWR<{ data: Instrument[]; warnings?: string[] }>(queryKey, paperRequest, swrOptions)
   const candidates = [...new Map((search?.data ?? []).filter(row => row.source === 'twelvedata' && row.currency === 'USD' && row.country === 'United States' && eligiblePaperType(row.instrument_type)).map(row => [instrumentSymbol(row), row])).values()].slice(0, 8)
   const quoteKey = workspaceReady ? `${paperEndpoint}?action=quote&symbol=${encodeURIComponent(symbol)}` : null
-  const { data: quote, isLoading: quoteLoading, error: quoteError, mutate: reloadQuote } = useSWR<PaperQuote>(quoteKey, paperRequest, { ...swrOptions, revalidateOnFocus: true, refreshInterval: 300_000, dedupingInterval: 30_000 })
-  const historyKey = `/api/market?action=history&symbol=${encodeURIComponent(quote?.symbol ?? symbol)}&interval=1day&outputsize=260&adjust=none`
-  const { data: history, isLoading: historyLoading, error: historyError, mutate: reloadChart } = useSWR<MarketHistory>(quote ? historyKey : null, paperRequest, { ...swrOptions, dedupingInterval: 300_000 })
+  const { data: marketQuote, isLoading: quoteLoading, error: quoteError, mutate: reloadQuote } = useMarketQuote<PaperQuote>(quoteKey, paperRequest)
+  const quote = marketQuote?.quote
+  const historyUrl = `/api/market?action=history&symbol=${encodeURIComponent(quote?.symbol ?? symbol)}&interval=1day&outputsize=260&adjust=none`
+  const historyKey = quote ? [historyUrl, quote.freshness === 'End-of-day' ? quote.date : 'intraday'] as const : null
+  const { data: history, isLoading: historyLoading, error: historyError, mutate: reloadChart } = useSWR<MarketHistory>(historyKey, ([url]) => paperRequest(url), { ...swrOptions, dedupingInterval: 300_000 })
   const values = useMemo(() => history?.meta?.currency === 'USD' ? history.values.filter(row => quote && (row.datetime < quote.date.slice(0, 10) || quote.freshness === 'End-of-day' && row.datetime === quote.date)).map(row => ({ datetime: row.datetime, close: Number(row.close) })).filter(row => row.close > 0 && Number.isFinite(row.close)).slice(-windows[range]) : [], [history, quote, range])
   const workspaceIssue = workspaceError ?? accountError?.message
 
@@ -56,9 +59,9 @@ export function PaperTradingTerminal({ workspaceReady, workspaceError, onRetryWo
         </div></header>
         <div className="paper-instrument-row"><div className="instrument-current"><span className="ticker-badge">{symbolParts(symbol).symbol}</span><div><strong>{instrument.instrument_name}</strong><small>{instrument.exchange} · USD</small></div></div><div className="paper-inline paper-periods" role="group" aria-label="Chart range">{(Object.keys(windows) as (keyof typeof windows)[]).map(item => <button type="button" className="button small" key={item} aria-pressed={range === item} onClick={() => setRange(item)}>{item}</button>)}</div></div>
         <div className="paper-market-price"><strong>{usd(quote?.price, 4)}</strong><span className="paper-tag paper-freshness"><Activity size={12} aria-hidden="true" /> {quote?.freshness ?? (quoteLoading ? 'Verifying price' : 'Price unavailable')}</span></div>
-        <p className="paper-note paper-source">Twelve Data{quote ? ` · ${tradingPriceTime(quote.date)} · Not streaming` : ' · Verified price required'}{quoteError ? <button className="text-button" type="button" onClick={() => void reloadQuote()}>Retry price</button> : historyError ? <button className="text-button" type="button" onClick={() => void reloadChart()}>Retry chart</button> : null}</p>
-        {quoteError || historyError ? <div className="paper-plot-state" role="alert">{quoteError?.message ?? historyError?.message}</div> : quoteLoading || historyLoading || !workspaceReady && !workspaceError ? <div className="paper-plot-state" role="status">Loading market history…</div> : values.length ? <PaperPriceChart values={values} /> : <div className="paper-plot-state">No verified USD chart history is available.</div>}
-        <p className="paper-note">Unadjusted daily closes. Current-session prices are excluded until after the session.</p>
+        <p className="paper-note paper-source">Twelve Data{quote ? ` · Price as of ${tradingPriceTime(quote.date)}` : ' · Verified price required'}{quoteError ? ' · Price refresh unavailable' : marketQuote ? ` · Checked ${marketCheckTime(marketQuote.checkedAt)}` : ''}{quoteError ? <button className="text-button" type="button" onClick={() => void reloadQuote()}>Retry price</button> : historyError ? <button className="text-button" type="button" onClick={() => void reloadChart()}>Retry chart</button> : null}</p>
+        {(!quote && quoteError) || historyError ? <div className="paper-plot-state" role="alert">{historyError?.message ?? quoteError?.message}</div> : quoteLoading || historyLoading || !workspaceReady && !workspaceError ? <div className="paper-plot-state" role="status">Loading market history…</div> : values.length ? <PaperPriceChart values={values} /> : <div className="paper-plot-state">No verified USD chart history is available.</div>}
+        <p className="paper-note">Prices are checked every minute while this tab is visible. The chart shows completed daily closes only.</p>
       </section>
       <PaperOrderTicket key={`${account?.accountId ?? 'pending'}:${symbol}`} {...{ symbol, account, quote, quoteLoading }} onFill={() => { setView('positions'); void onUpdate() }} />
     </div>

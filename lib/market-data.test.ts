@@ -52,6 +52,23 @@ describe('market data normalization and validation', () => {
     expect(String(fetcher.mock.calls[0][0])).toContain('adjust=all')
   })
 
+  it('refreshes recent five-minute bars sooner than daily history', async () => {
+    const initial = Date.parse('2026-04-06T14:36:00Z')
+    using clock = vi.spyOn(Date, 'now').mockReturnValue(initial)
+    const provider = vi.fn(async (url: URL) => Response.json({ meta: { symbol: 'AAPL' }, values: [bar(url.searchParams.get('interval') === '5min' ? '2026-04-06 14:30:00' : '2026-04-06')] }))
+    const adapter = new TwelveDataAdapter('test-key', provider as unknown as typeof fetch)
+    const intraday = { symbol: 'AAPL', interval: '5min', outputsize: 4 } as const
+    const daily = { ...intraday, interval: '1day' } as const
+    const firstIntraday = await adapter.history(intraday)
+    const firstDaily = await adapter.history(daily)
+    clock.mockReturnValue(initial + 59_999)
+    expect(await adapter.history(intraday)).toBe(firstIntraday)
+    clock.mockReturnValue(initial + 60_000)
+    expect(await adapter.history(intraday)).not.toBe(firstIntraday)
+    expect(await adapter.history(daily)).toBe(firstDaily)
+    expect(provider).toHaveBeenCalledTimes(3)
+  })
+
   it('retries provider rate limits and returns the next successful response', async () => {
     const responses = [new Response(JSON.stringify({ status: 'error', code: 429, message: 'Rate limited' }), { status: 429 }), new Response(JSON.stringify({ values: [{ datetime: '2026-04-06', open: '1', high: '2', low: '1', close: '2', volume: '10' }] }), { status: 200 })]
     const fetcher = vi.fn(async (_input: URL | RequestInfo) => responses.shift()!)

@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
   if (!SYMBOL_PATTERN.test(symbolValue)) return jsonError('Select a valid exchange-qualified instrument.', 'INVALID_SYMBOL', 400)
   const symbol = normalizeSymbol(symbolValue)
   if (actionValue === 'quote') {
-    try { return NextResponse.json(await marketDataProvider.quote(symbol), { headers: { 'Cache-Control': 'private, max-age=30' } }) } catch (error) { return asError(error) }
+    try { return NextResponse.json(await marketDataProvider.quote(symbol), { headers: { 'Cache-Control': 'private, no-store' } }) } catch (error) { return asError(error) }
   }
   const intervalValue = searchParams.get('interval') ?? '1day'
   if (!MARKET_INTERVALS.includes(intervalValue as MarketInterval)) return jsonError('Unsupported historical interval.', 'INVALID_INTERVAL', 400)
