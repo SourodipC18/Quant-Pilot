@@ -10,11 +10,15 @@ import { symbolParts } from '@/lib/market-instruments'
 import { ResearchPanel, ResearchResults } from '@/components/research-results'
 import { ResearchActions, requestResearch } from '@/components/research-actions'
 
+import useSWR from 'swr'
+import { paperPortfolioEndpoint, paperRequest } from './paper-order-ticket'
+import type { PaperPortfolio } from '@/lib/paper-trading-types'
 import { ResearchRollingFactors } from './research-rolling-factors'
 
 const icons = { regimes: Activity, factors: BarChart3, forecast: TrendingUp, scenarios: Waves }
 
 export function ResearchStudio({ initialSymbol, initialMethod, workspaceLoading, providerConfigured, sample, dark }: { initialSymbol: string; initialMethod: ResearchMethod; workspaceLoading: boolean; providerConfigured?: boolean; sample?: SamplePortfolio; dark: boolean }) {
+  const { data: paper } = useSWR<PaperPortfolio>(!workspaceLoading && !sample ? paperPortfolioEndpoint : null, paperRequest, { revalidateOnFocus: false })
   const [method, setMethod] = useState(sample ? 'scenarios' : initialMethod)
   const [ticker, setTicker] = useState(initialSymbol)
   const [basket, setBasket] = useState(initialSymbol)
@@ -51,6 +55,7 @@ export function ResearchStudio({ initialSymbol, initialMethod, workspaceLoading,
     </section>}
     <ResearchPanel eyebrow={sample ? 'Portfolio scenarios · illustrative target weights' : 'Run controls'} title={methodInfo[method].title}>
       {sample && <div className="paper-inline" aria-label={`${sample.name} allocation`}>{sample.holdings.map(asset => <span className="paper-tag" key={asset.symbol}>{symbolParts(asset.symbol).symbol} {asset.weightBps / 100}%</span>)}</div>}
+      {!sample && Boolean(paper?.positions.length) && <div><label>Use an open paper position <select aria-label="Use an open paper position" value="" disabled={pending} onChange={event => { const symbol = event.target.value; setTicker(symbol); setBasket(symbol); setFactorSymbols(symbol); setRun(null); setError('') }}><option value="" disabled>Select a holding</option>{paper?.positions.map(p => <option key={p.symbol} value={p.symbol}>{p.symbol} · {p.shares} shares</option>)}</select></label><p className="paper-note">Research uses historical prices for the selected instrument, not your account’s realized returns.</p></div>}
       <form className="research-run-form" onSubmit={submit}>
         <FieldGroup className="research-control-grid">
           {method === 'scenarios' ? !sample && <Field className="analytics-field"><FieldLabel htmlFor="research-basket">Portfolio symbols</FieldLabel><input id="research-basket" required value={basket} maxLength={333} onChange={event => setBasket(event.target.value)} placeholder="AAPL, MSFT" autoComplete="off" aria-describedby="research-basket-help"/><FieldDescription id="research-basket-help">One to five comma-separated symbols. Multiple assets use equal weights.</FieldDescription></Field>

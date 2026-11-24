@@ -8,12 +8,13 @@ export function tradingPriceTime(date: string) {
   return date.length === 10 ? `${date} close` : `${date.slice(0, 10)} ${date.slice(11, 16)} UTC`
 }
 export type PaperFill = {
-  id: string; createdAt: string; symbol: string; side: PaperSide; shares: number; fillPrice: number; referencePrice: number;
+  journal?: import('./paper-orders').Journal; id: string; createdAt: string; symbol: string; side: PaperSide; shares: number; fillPrice: number; referencePrice: number;
   notional: number; commission: number; slippageBps: number; realized: number | null; markDate: string;
 }
 export type PaperHolding = { symbol: string; shares: number; averageCost: number }
 export type PaperPortfolio = { accountId: string; cash: number; equity: number; positions: PaperHolding[] }
 export type PaperAccount = Omit<PaperPortfolio, 'positions'> & {
+  orders: import('./paper-orders').SimOrder[]; limits: import('./paper-orders').Limits; reserved: number; dailyPnl:number;
   startingCash: number; costs: PaperCosts; marketValue: number; invested: number; buyingPower: number;
   realized: number; unrealized: number; totalReturn: number; completedTrades: number; unavailableMarks: number;
   positions: (PaperHolding & { mark: number; markDate: string; marketValue: number; unrealized: number })[];

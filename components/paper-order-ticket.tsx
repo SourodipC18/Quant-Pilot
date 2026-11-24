@@ -45,7 +45,7 @@ export function PaperOrderTicket({ symbol, account, quote, quoteLoading, onFill 
     try {
       estimate = estimateOrder(side, mode, amount.trim(), BigInt(Math.round(quote.price * 1_000_000)), account.costs)
       if (side === 'sell' && sharesNumber(estimate.units) > owned) inputError = 'You cannot sell more shares than you own.'
-      if (side === 'buy' && -dollarsNumber(estimate.deltaCents) > account.cash) inputError = 'This order exceeds available cash.'
+      if (side === 'buy' && -dollarsNumber(estimate.deltaCents) > account.buyingPower) inputError = 'This order exceeds available cash.'
     } catch (error) { inputError = error instanceof Error ? error.message : 'Enter a valid amount.' }
   }
 
@@ -84,7 +84,7 @@ export function PaperOrderTicket({ symbol, account, quote, quoteLoading, onFill 
         <Field data-invalid={Boolean(inputError)}><FieldLabel htmlFor="paper-order-amount">{mode === 'shares' ? 'Quantity' : 'Amount in USD'}</FieldLabel><input id="paper-order-amount" inputMode="decimal" autoComplete="off" value={amount} maxLength={18} aria-invalid={Boolean(inputError)} aria-describedby={inputError ? 'paper-amount-error' : undefined} onChange={event => { setAmount(event.target.value); setError(''); setConfirmed(null) }} /></Field>
       </FieldGroup>
       <dl className="paper-estimate">
-        <div><dt>Available {side === 'buy' ? 'cash' : 'shares'}</dt><dd>{account ? side === 'buy' ? usd(account.cash) : quantity(owned) : '—'}</dd></div>
+        <div><dt>Available {side === 'buy' ? 'cash' : 'shares'}</dt><dd>{account ? side === 'buy' ? usd(account.buyingPower) : quantity(owned) : '—'}</dd></div>
         <div><dt>Est. order value</dt><dd>{usd(estimate && dollarsNumber(estimate.notionalCents))}</dd></div>
         <div><dt>Est. commission</dt><dd>{usd(estimate && dollarsNumber(estimate.commissionCents))}</dd></div>
         <div><dt>Slippage</dt><dd>{account ? `${account.costs.slippageBps} bps` : '—'}</dd></div>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useId, useState } from 'react'
-import { Area, AreaChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, ReferenceDot, ReferenceLine, Line, LineChart, XAxis, YAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
 import { priceLabel } from '@/lib/market-instruments'
 import type { PaperAccount } from '@/lib/paper-trading-types'
@@ -16,9 +16,11 @@ const shortTime = new Intl.DateTimeFormat('en-US', { timeStyle: 'short' })
 const short = (stamp: string) => shortDate.format(new Date(stamp))
 const axis = { axisLine: false, tickLine: false, tick: { fill: 'var(--muted)', fontSize: 10 } }
 
-export function PaperPriceChart({ values }: { values: { datetime: string; close: number }[] }) {
+export function PaperPriceChart({ values,account,symbol }: { values: { datetime: string; close: number }[]; account?:PaperAccount;symbol:string }) {
+  const pos=account?.positions.find(p=>p.symbol===symbol), levels=account?.orders.filter(o=>o.symbol===symbol&&o.status==='pending').flatMap(o=>(['limit','stop','target'] as const).filter(k=>o[k]).map(k=>({id:o.id+k,label:k,value:o[k]!})))??[]
+  const days=new Set(values.map(v=>v.datetime)), fills=account?.trades.filter(t=>t.symbol===symbol&&days.has(t.markDate.slice(0,10)))??[]
   const id = useId()
-  return <ChartContainer config={config} className="paper-price-chart w-full" aria-label="Historical daily USD closing prices">
+  return <ChartContainer config={config} className="paper-price-chart w-full" aria-label="Verified USD prices and simulated trade levels">
     <AreaChart accessibilityLayer data={values} margin={{ top: 10, right: 4, bottom: 0, left: 0 }}>
       <defs><linearGradient id={id} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="var(--color-close)" stopOpacity={0.25} /><stop offset="100%" stopColor="var(--color-close)" stopOpacity={0.015} /></linearGradient></defs>
       <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
@@ -26,6 +28,9 @@ export function PaperPriceChart({ values }: { values: { datetime: string; close:
       <YAxis orientation="right" width={54} domain={['auto', 'auto']} tickFormatter={value => compactUsd.format(value)} {...axis} />
       <ChartTooltip content={<ChartTooltipContent labelFormatter={value => short(String(value))} formatter={value => priceLabel(Number(value), 'USD')} />} />
       <Area type="linear" dataKey="close" stroke="var(--color-close)" fill={`url(#${id})`} strokeWidth={2} isAnimationActive={false} />
+      {pos&&<ReferenceLine y={pos.averageCost} ifOverflow="extendDomain" stroke="var(--chart-2)" strokeDasharray="3 3" label="Avg. entry"/>}
+      {levels.map(l=><ReferenceLine key={l.id} y={l.value} ifOverflow="extendDomain" stroke="var(--chart-3)" strokeDasharray="5 4" label={l.label}/>)}
+      {fills.map(t=><ReferenceDot key={t.id} x={t.markDate.slice(0,10)} y={t.fillPrice} ifOverflow="extendDomain" r={4} fill={t.side==='buy'?'var(--chart-2)':'var(--chart-3)'} label={t.side==='buy'?'B':'S'}/>)}
     </AreaChart>
   </ChartContainer>
 }
