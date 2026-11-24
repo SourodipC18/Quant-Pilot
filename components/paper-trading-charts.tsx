@@ -20,7 +20,7 @@ export function PaperPriceChart({ values,account,symbol }: { values: { datetime:
   const pos=account?.positions.find(p=>p.symbol===symbol), levels=account?.orders.filter(o=>o.symbol===symbol&&o.status==='pending').flatMap(o=>(['limit','stop','target'] as const).filter(k=>o[k]).map(k=>({id:o.id+k,label:k,value:o[k]!})))??[]
   const days=new Set(values.map(v=>v.datetime)), fills=account?.trades.filter(t=>t.symbol===symbol&&days.has(t.markDate.slice(0,10)))??[]
   const id = useId()
-  return <ChartContainer config={config} className="paper-price-chart w-full" aria-label="Historical daily USD closing prices">
+  return <ChartContainer config={config} className="paper-price-chart w-full" aria-label="Verified USD prices and simulated trade levels">
     <AreaChart accessibilityLayer data={values} margin={{ top: 10, right: 4, bottom: 0, left: 0 }}>
       <defs><linearGradient id={id} x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="var(--color-close)" stopOpacity={0.25} /><stop offset="100%" stopColor="var(--color-close)" stopOpacity={0.015} /></linearGradient></defs>
       <CartesianGrid stroke="var(--chart-grid)" vertical={false} />

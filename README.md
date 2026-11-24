@@ -15,6 +15,15 @@ It combines real market data, mathematical financial models, statistical analysi
 
 ---
 
+## Advanced paper trading (Phase 6D)
+
+**Simulation only.** Each workspace starts with USD 5,000,000. Market, limit, stop, stop-limit, protective sell and linked bracket orders use verified USD stock/ETF prices; no order is routed to a broker. Upstox remains available for Indian market research, not INR settlement. There is no margin, short selling or currency conversion.
+
+- **When orders run:** market and bracket entries need a completed regular-session five-minute bar less than five minutes old. Delayed and end-of-day marks can value positions but cannot execute trades. Conditional orders run on the server when the user selects **Check orders**, not continuously or during quote refresh. Missed intrabar touches are not replayed. Limit fills require the simulated price after slippage to pass the limit; a stop-limit trigger needs a later qualifying bar. Stops can fill beyond their trigger price after a gap.
+- **Reservations and expiry:** pending buys reserve cash and sells reserve shares; linked bracket exits share one reservation. A fill cancels its sibling in the same account transaction. Day orders expire at 16:00 New York time on the submission weekday (not an exchange holiday calendar); GTC orders remain pending until filled, rejected or cancelled. Expiry is recorded on the next account/order evaluation.
+- **Performance and risk:** actual simulated fills and equity snapshots power the journal, CSV and performance views. Daily P&L is measured from the last snapshot before the current UTC day, or opening funding. Historical research on open holdings is hypothetical. Single-position, top-three concentration, order-value and daily-loss limits are optional; qualifying fills are checked again before settlement.
+- **Database upgrade:** after the original paper-account tables exist, apply [`lib/db/phase-6d-orders.sql`](lib/db/phase-6d-orders.sql) to each target database before deploying this version. It adds the scoped order table, account risk settings and execution journal in one transaction. Existing accounts, balances and fills are preserved; existing rows default to empty settings and journals. Do not reset accounts to migrate them.
+
 ## Table of Contents
 
 - [Overview](#overview)

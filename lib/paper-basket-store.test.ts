@@ -2,7 +2,7 @@ import { vi, beforeEach, afterEach, describe, it, expect } from 'vitest'
 import { getTableName, type Table, type SQL } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { STARTING_CASH } from './paper-trading-math'
-import { confirmPaperBasket, confirmPaperOrder, loadPaperAccount, loadPaperComparison, reviewPaperBasket, reviewPaperOrder } from './paper-trading-store'
+import { cancelOrder, checkOrders, placeOrder, saveLimits, confirmPaperBasket, confirmPaperOrder, loadPaperAccount, loadPaperComparison, reviewPaperBasket, reviewPaperOrder } from './paper-trading-store'
 import { SAMPLE_PORTFOLIOS } from './sample-portfolios'
 
 const mocks = vi.hoisted(() => ({ db: { select: vi.fn(), transaction: vi.fn() }, close: vi.fn() }))
@@ -97,6 +97,57 @@ describe('trading account valuation', () => {
     mocks.close.mockRejectedValueOnce(new Error('Market data unavailable'))
     expect(await loadPaperAccount(owner)).toMatchObject({ unrealized: -10, unavailableMarks: 1 })
     expect(saved.paper_equity_snapshots).toHaveLength(3)
+  })
+})
+
+describe('advanced paper orders', () => {
+  const symbol = sample.holdings[0].symbol
+  const terms = { kind: 'limit', side: 'buy', limit: 99, amount: '1', tif: 'GTC' } as const
+  function bar(minutes: number, price: number) {
+    const date = new Date(Date.parse(markDate) + minutes * 60_000)
+    vi.setSystemTime(date)
+    mocks.close.mockResolvedValue({symbol, date: date.toISOString(), priceMicros: BigInt(price * 1_000_000)})
+  }
+  it('persists reservations, rejects stale edits and releases cancelled or expired orders', async () => {
+    const id = crypto.randomUUID()
+    const order = await placeOrder(owner, accountId, id, symbol, terms)
+    expect(await placeOrder(owner, accountId, id, symbol, terms)).toEqual(order)
+    const modified = await placeOrder(owner, accountId, id, symbol, {...terms, amount:'2'}, true, 1)
+    expect(modified.history).toHaveLength(2)
+    await expect(placeOrder(owner, accountId, id, symbol, terms, true, 1)).rejects.toThrow('changed')
+    expect((await loadPaperAccount(owner)).reserved).toBe(Number(modified.reserve)/100)
+    await cancelOrder(owner,accountId,id)
+    const day = await placeOrder(owner,accountId,crypto.randomUUID(),symbol,{...terms,tif:'Day'})
+    vi.setSystemTime(new Date(day.expiry!))
+    expect(await loadPaperAccount(owner)).toMatchObject({reserved:0, orders:expect.arrayContaining([expect.objectContaining({status:'expired'}),expect.objectContaining({status:'cancelled'})])})
+  })
+  it.each([[80,'stop-loss'],[120,'take-profit']] as const)('settles a gap at %i and cancels the sibling', async (price, exitKind) => {
+    const entry = await placeOrder(owner, accountId, crypto.randomUUID(), symbol, {...terms,kind:'bracket',stop:90,target:110})
+    expect(entry.status).toBe('filled')
+    const excess = await placeOrder(owner, accountId, crypto.randomUUID(), symbol,{...terms,side:'sell',amount:'2'})
+    expect(excess.status).toBe('rejected')
+    bar(5,price)
+    expect((await checkOrders(owner,accountId)).fills).toBe(1)
+    expect((await checkOrders(owner,accountId)).fills).toBe(0)
+    const a = await loadPaperAccount(owner)
+    expect(a.orders.filter(o=>o.group===entry.id).map(o=>[o.kind,o.status])).toContainEqual([exitKind,'filled'])
+    expect(a.orders.filter(o=>o.group===entry.id&&o.status==='cancelled')).toHaveLength(1)
+    expect(a.positions[0].shares).toBe(1)
+    expect(a.completedTrades).toBe(2)
+  })
+  it('requires a later qualifying bar after a stop-limit trigger', async () => {
+    await placeOrder(owner,accountId,crypto.randomUUID(),symbol,{...terms,kind:'stop-limit',stop:105,limit:108})
+    bar(5,106); expect((await checkOrders(owner,accountId)).fills).toBe(0)
+    expect((await checkOrders(owner,accountId)).fills).toBe(0)
+    bar(10,110); expect((await checkOrders(owner,accountId)).fills).toBe(0)
+    bar(15,107); expect((await checkOrders(owner,accountId)).fills).toBe(1)
+  })
+  it('rejects insufficient cash and enforces risk limits at execution', async () => {
+    expect((await placeOrder(owner,accountId,crypto.randomUUID(),symbol,{...terms,amount:'100000'})).status).toBe('rejected')
+    await placeOrder(owner,accountId,crypto.randomUUID(),symbol,{...terms,kind:'stop',stop:105})
+    await saveLimits(owner,accountId,{order:104}); bar(5,106)
+    expect((await checkOrders(owner,accountId)).fills).toBe(0)
+    expect(saved.paper_executions).toHaveLength(0)
   })
 })
 
