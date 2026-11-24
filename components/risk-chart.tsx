@@ -60,13 +60,13 @@ export function RiskChart({ surface, heatmap, dark, onExport, default3d = false 
     {failed && <p className="method-note" role="status">WebGL unavailable. The 2D heatmap and CSV contain the same underlying data.</p>}
     {show3d ? <SurfaceView data={surface} dark={dark} embedded onUnavailable={() => setFailed(true)} /> : heatmap}
     <div className="risk-legend">
-      <div className="risk-legend-scale"><span aria-hidden="true" style={{ background: `linear-gradient(90deg, ${scale.colors.join(',')})` }} /><div><span>{surface.formatValue?.(-scale.extent)}</span><span>0</span><span>{surface.formatValue?.(scale.extent)}</span></div></div>
+      <div className="risk-legend-scale"><span aria-hidden="true" style={{ background: `linear-gradient(90deg, ${(scale.domain === 'positive' ? scale.colors.slice(1) : scale.domain === 'negative' ? scale.colors.slice(0, 2) : scale.colors).join(',')})` }} /><div>{scale.domain !== 'positive' && <span>{surface.formatValue?.(-scale.extent)}</span>}<span>0</span>{scale.domain !== 'negative' && <span>{surface.formatValue?.(scale.extent)}</span>}</div></div>
       <span>{scale.legend}</span>
     </div>
   </div>
 }
 
-export function RiskHeatmap({ data, caption, selected, onSelect, pageSize = 30 }: { data: SurfaceData; caption: string; selected?: [number, number]; onSelect?: (i: number, j: number) => void; pageSize?: number }) {
+export function RiskHeatmap({ data, caption, selected, highlighted, onSelect, pageSize = 30 }: { data: SurfaceData; caption: string; selected?: [number, number]; highlighted?: number[]; onSelect?: (i: number, j: number) => void; pageSize?: number }) {
   const pages = Math.max(1, Math.ceil(data.x.length / pageSize))
   const [pageOffset, setPageOffset] = useState(0)
   const [focused, setFocused] = useState<[number, number] | null>(null)
@@ -77,7 +77,7 @@ export function RiskHeatmap({ data, caption, selected, onSelect, pageSize = 30 }
   const scale = data.scale!
   const describe = (i: number, j: number) => {
     const value = data.z[i][j]
-    return value == null ? `${data.ticks?.[0][i] ?? data.x[i]} · ${data.ticks?.[1][j] ?? data.y[j]} · Not available` : data.describe?.(i, j, value) ?? String(value)
+    return value == null ? `${data.ticks?.[0][i] ?? data.x[i]} · ${data.ticks?.[1][j] ?? data.y[j]} · Not available` : `${highlighted?.[j] === i ? 'Deepest drawdown · ' : ''}${data.describe?.(i, j, value) ?? String(value)}`
   }
   const details = focused && focused[0] >= start && focused[0] < end && focused[1] < data.y.length ? focused : current
   return <div className="risk-heatmap">
@@ -89,7 +89,7 @@ export function RiskHeatmap({ data, caption, selected, onSelect, pageSize = 30 }
         <tbody>{data.y.map((y, j) => <tr key={y}><th scope="row">{data.ticks?.[1][j] ?? y}</th>{data.x.slice(start, end).map((x, k) => {
           const i = start + k, value = data.z[i][j], active = selected?.[0] === i && selected[1] === j
           const color = value == null ? undefined : `color-mix(in srgb, ${scale.colors[value < 0 ? 0 : 2]} ${Math.min(100, Math.abs(value) / scale.extent * 100)}%, ${scale.colors[1]})`
-          return <td key={x}><button type="button" data-cell={`${i}:${j}`} data-selected={active || undefined} aria-label={describe(i, j)} aria-pressed={onSelect ? active : undefined} title={describe(i, j)} tabIndex={i === details[0] && j === details[1] ? 0 : -1}
+          return <td key={x}><button type="button" data-cell={`${i}:${j}`} data-selected={active || highlighted?.[j] === i || undefined} aria-label={describe(i, j)} aria-pressed={onSelect ? active : undefined} title={describe(i, j)} tabIndex={i === details[0] && j === details[1] ? 0 : -1}
             style={{ background: color }} onPointerEnter={() => setFocused([i, j])} onFocus={() => setFocused([i, j])} onClick={() => onSelect?.(i, j)}
             onKeyDown={event => {
               const steps = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }

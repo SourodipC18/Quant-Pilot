@@ -48,7 +48,7 @@ export function AxisLabel({ position, text, color, title = false }: { position: 
     ctx.fillStyle = color
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(text, 256, 40)
+    ctx.fillText(text, 256, 40, 488)
     const texture = new CanvasTexture(canvas)
     texture.colorSpace = SRGBColorSpace
     return texture

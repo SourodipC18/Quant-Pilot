@@ -10,9 +10,11 @@ import { symbolParts } from '@/lib/market-instruments'
 import { ResearchPanel, ResearchResults } from '@/components/research-results'
 import { ResearchActions, requestResearch } from '@/components/research-actions'
 
+import { ResearchRollingFactors } from './research-rolling-factors'
+
 const icons = { regimes: Activity, factors: BarChart3, forecast: TrendingUp, scenarios: Waves }
 
-export function ResearchStudio({ initialSymbol, initialMethod, workspaceLoading, providerConfigured, sample }: { initialSymbol: string; initialMethod: ResearchMethod; workspaceLoading: boolean; providerConfigured?: boolean; sample?: SamplePortfolio }) {
+export function ResearchStudio({ initialSymbol, initialMethod, workspaceLoading, providerConfigured, sample, dark }: { initialSymbol: string; initialMethod: ResearchMethod; workspaceLoading: boolean; providerConfigured?: boolean; sample?: SamplePortfolio; dark: boolean }) {
   const [method, setMethod] = useState(sample ? 'scenarios' : initialMethod)
   const [ticker, setTicker] = useState(initialSymbol)
   const [basket, setBasket] = useState(initialSymbol)
@@ -68,6 +70,7 @@ export function ResearchStudio({ initialSymbol, initialMethod, workspaceLoading,
       </form>
       {error && <p role="alert" className="research-error">{error}</p>}
     </ResearchPanel>
+    {method === 'factors' && <ResearchRollingFactors targets={factorSymbols} dark={dark} />}
     {run ? <><ResearchResults report={run.report}/><ResearchActions key={run.report.id} run={run}/></> : !pending && !error && <section className="panel research-empty"><FileText size={18} aria-hidden="true"/><div><h2>No analysis yet</h2><p>Run a method to open its evidence, export a PDF, or ask for a source-cited interpretation.</p></div></section>}
   </div>
 }

@@ -39,14 +39,14 @@ export default function SurfaceScene({
   hover: (s: string) => void
   fail: () => void
 }) {
-  const { x, y, z, labels, scale, ticks, describe, formatValue, linearAxes } = data,
+  const { x, y, z, labels, scale, ticks, describe, formatValue, linearAxes, connectX } = data,
     theme = colorSets[dark ? 'dark' : 'light']
   const mesh = useMemo(() => {
     const finite = z
         .flat()
         .filter((v): v is number => v != null && Number.isFinite(v)),
-      min = scale ? -scale.extent : Math.min(...finite),
-      max = scale ? scale.extent : Math.max(...finite)
+      min = scale ? (scale.domain === 'positive' ? 0 : -scale.extent) : Math.min(...finite),
+      max = scale ? (scale.domain === 'negative' ? 0 : scale.extent) : Math.max(...finite)
     const stops = scale?.colors.map(color => new Color(color))
     const relative = (axis: number[], index: number) => linearAxes && axis.length > 1
       ? (axis[index] - axis[0]) / (axis.at(-1)! - axis[0])
@@ -77,7 +77,7 @@ export default function SurfaceScene({
           ).toArray(),
         )
         if (v != null) available.push(idx)
-        if (i && j) {
+        if (i && j && (!connectX || (connectX[i][j] && connectX[i][j - 1]))) {
           const a = idx - y.length - 1,
             b = idx - y.length,
             c = idx - 1
@@ -103,7 +103,7 @@ export default function SurfaceScene({
       min,
       max,
     }
-  }, [x, y, z, dark, scale, linearAxes])
+  }, [x, y, z, dark, scale, linearAxes, connectX])
   const detail = (k: number) => {
     const i = Math.floor(k / y.length), j = k % y.length
     const value = z[i]?.[j]
@@ -146,7 +146,7 @@ export default function SurfaceScene({
       </mesh>
       {y.length === 1 && <Lines color={theme.text} positions={new Float32Array(z.slice(1).flatMap(([v], i) => {
         const previous = z[i][0]
-        return v == null || previous == null ? [] : [...mesh.xyz(i, 0, previous), ...mesh.xyz(i + 1, 0, v)]
+        return v == null || previous == null || (connectX && !connectX[i + 1][0]) ? [] : [...mesh.xyz(i, 0, previous), ...mesh.xyz(i + 1, 0, v)]
       }))} />}
       <points
         onPointerMove={(e) => {
@@ -201,7 +201,7 @@ export default function SurfaceScene({
         title
       />
       <AxisLabel
-        position={[-0.45, -0.45, 3]}
+        position={[-1.15, -0.6, 2]}
         text={labels[1]}
         color={theme.text}
         title
