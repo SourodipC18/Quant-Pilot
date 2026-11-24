@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { Activity, BarChart3, CircleHelp, Gauge, Layers3, Shield, SlidersHorizontal, Waves, X } from 'lucide-react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
+import { SurfaceView } from './surface-view'
 import { MonteCarloChart } from '@/components/monte-carlo-chart'
 import { priceLabel } from '@/lib/market-instruments'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
@@ -80,7 +81,7 @@ function makeHistogram(values: number[], count = 12) {
   return bins.map(bin => ({ ...bin, bin: `${(bin.midpoint * 100).toFixed(1)}%` }))
 }
 
-export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading, historyError, range, setRange, activeTab, onActiveTabChange, sampleReturns }: { symbol: string; currency?: string; bars: NumericBar[]; config: BacktestConfig; loading: boolean; historyError: string; range: string; setRange: (value: string) => void; activeTab: AnalyticsTab; onActiveTabChange: (tab: AnalyticsTab) => void; sampleReturns?: number[] }) {
+export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading, historyError, range, setRange, activeTab, onActiveTabChange, sampleReturns, dark }: { dark: boolean; symbol: string; currency?: string; bars: NumericBar[]; config: BacktestConfig; loading: boolean; historyError: string; range: string; setRange: (value: string) => void; activeTab: AnalyticsTab; onActiveTabChange: (tab: AnalyticsTab) => void; sampleReturns?: number[] }) {
   const money = (value: number | null | undefined, digits = 0) => priceLabel(value, currency, digits)
   const [commissionBps, setCommissionBps] = useState(config.commissionBps)
   const [slippageBps, setSlippageBps] = useState(config.slippageBps)
@@ -97,6 +98,8 @@ export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading,
   const [simulationDensity, setSimulationDensity] = useState(160)
   const [simulationSeed, setSimulationSeed] = useState(42)
   const [simulationSource, setSimulationSource] = useState<'price' | 'strategy'>('price')
+  const [view,setView]=useState('2D trajectories')
+  const [graphicsFailed,setGraphicsFailed]=useState(false)
   const [showFullRange, setShowFullRange] = useState(false)
   const [scenarios, setScenarios] = useState<Scenario[]>([
     { id: 1, label: 'Broad risk-off', shock: -20 },
@@ -187,7 +190,7 @@ export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading,
         <Panel title="Held-out fold performance" eyebrow="No test-period parameter selection"><ChartContainer config={chartConfig} className="advanced-chart"><BarChart data={folds.map((fold, index) => ({ ...fold, fold: `Fold ${index + 1}`, oos: (fold.outOfSampleReturn ?? 0) * 100 }))} accessibilityLayer><CartesianGrid vertical={false} strokeDasharray="3 3" /><XAxis dataKey="fold" tickLine={false} axisLine={false} /><YAxis tickLine={false} axisLine={false} tickFormatter={value => `${Number(value).toFixed(0)}%`} /><ChartTooltip content={<ChartTooltipContent formatter={value => `${number(Number(value))}%`} />} /><Bar dataKey="oos" name="Held-out return" fill="var(--color-strategy)" radius={[3, 3, 0, 0]} /></BarChart></ChartContainer><div className="table-scroll"><table className="data-table"><thead><tr><th>Fold</th><th>Training period</th><th>Held-out period</th><th>Selected windows</th><th>Train Sharpe</th><th>OOS return</th></tr></thead><tbody>{folds.map((fold, index) => <tr key={`${fold.testStart}-${index}`}><td>{index + 1}</td><td>{fold.trainStart.slice(0, 10)} → {fold.trainEnd.slice(0, 10)}</td><td>{fold.testStart.slice(0, 10)} → {fold.testEnd.slice(0, 10)}</td><td>{fold.fastWindow} / {fold.slowWindow}</td><td>{number(fold.trainingSharpe)}</td><td className={(fold.outOfSampleReturn ?? 0) >= 0 ? 'positive' : 'negative'}>{percent(fold.outOfSampleReturn)}</td></tr>)}</tbody></table>{!folds.length && <div className="chart-placeholder">Increase history or reduce the training window to create validation folds.</div>}</div></Panel>
       </>}
       {activeTab === 'Monte Carlo' && <>
-        <Panel title="Bootstrap design" eyebrow={sampleReturns ? 'Sample target weights · aligned daily history' : `${symbol} · ${range} history`}>
+        <Panel title="Bootstrap design" eyebrow={sampleReturns ? 'Portfolio weights · aligned daily history' : `${symbol} · ${range} history`}>
           <FieldGroup className="analytics-control-grid">
             {!sampleReturns && <Field className="analytics-field">
               <FieldLabel htmlFor="simulation-source">Return source</FieldLabel>
@@ -205,16 +208,19 @@ export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading,
             <span>5th percentile <strong>{money(simulations.terminalP05, 2)}</strong></span>
             <span>Median ending value <strong>{money(simulations.terminalMedian, 2)}</strong></span>
             <span>95th percentile <strong>{money(simulations.terminalP95, 2)}</strong></span>
+            <span>Expected ending value <strong>{money(simulations.expectedTerminal,2)}</strong></span>
             <span>Probability below start <strong>{percent(simulations.probabilityOfLoss)}</strong></span>
             <span>5th percentile max drawdown <strong className="negative">{percent(simulations.maxDrawdownP05)}</strong></span>
           </div>}
-          <p className="method-note">{sampleReturns ? 'Aligned daily returns use the sample’s target weights, rebalanced daily without trading costs.' : simulationSource === 'price' ? 'Daily price returns model buy-and-hold before trading costs.' : 'Net strategy returns include configured trading costs and sessions spent in cash.'} The model samples daily returns independently, with replacement. The same history, seed, and settings reproduce the same paths. The results are illustrative, not forecasts.</p>
+          <p className="method-note">{sampleReturns ? 'Each draw selects one historical session for all holdings together. Weights are held constant by daily rebalancing without trading costs.' : simulationSource === 'price' ? 'Daily price returns model buy-and-hold before trading costs.' : 'Net strategy returns include configured trading costs and sessions spent in cash.'} The model samples daily returns independently, with replacement. The same history, seed, and settings reproduce the same paths. The results are illustrative, not forecasts.</p>
         </Panel>
-        <Panel title={`${symbol} Monte Carlo trajectory cloud`} eyebrow={simulations ? `${Math.min(simulations.trajectories.length, simulationDensity)} shown of ${number(simulations.paths, 0)} paths · ${simulations.steps} sessions · ${number(simulationReturns.length, 0)} historical returns` : 'Simulation results'}>
+        <Panel title={`${symbol} · ${view}`} eyebrow={simulations ? `${view === '2D trajectories' ? `${Math.min(simulations.trajectories.length, simulationDensity)} shown of ` : 'All '}${number(simulations.paths, 0)} paths · ${simulations.steps} sessions · ${number(simulationReturns.length, 0)} historical returns` : 'Simulation results'}>
           {simulations ? <>
             {simulationReturns.length < 60 && <p className="method-note simulation-flat-notice">This projection uses only {simulationReturns.length} historical returns. A longer range gives the model more market conditions to sample.</p>}
             {simulationReturns.every(value => value === simulationReturns[0]) && <p className="method-note simulation-flat-notice">{simulationSource === 'strategy' ? 'Strategy returns did not vary in this range, so all paths overlap. Try a longer history range or switch to daily price returns.' : 'Daily price returns did not vary in this range, so all paths overlap. Try a longer history range.'}</p>}
-            <div className="simulation-controls">
+            <div className="range-tabs" role="group" aria-label="Simulation visualization">{['2D trajectories','3D probability surface','Terminal distribution'].map(v=><button type="button" key={v} disabled={graphicsFailed && v.startsWith('3D')} aria-pressed={view===v} className={view===v?'active':''} onClick={()=>setView(v)}>{v}</button>)}</div>
+            {graphicsFailed && <p role="status">WebGL unavailable. Showing a 2D visualization.</p>}
+            {view==='2D trajectories' && <><div className="simulation-controls">
               <div className="simulation-control"><span>VISIBLE PATHS</span><div className="range-tabs" role="group" aria-label="Visible simulation paths">
                 {[80, 160, 240].map(density => <button key={density} type="button" aria-pressed={simulationDensity === density} className={simulationDensity === density ? 'active' : ''} onClick={() => setSimulationDensity(density)}>{density}</button>)}
               </div></div>
@@ -223,7 +229,9 @@ export function AdvancedAnalyticsView({ symbol, currency, bars, config, loading,
                 <button type="button" aria-pressed={showFullRange} className={showFullRange ? 'active' : ''} onClick={() => setShowFullRange(true)}>Full range</button>
               </div></div>
             </div>
-            <MonteCarloChart currency={currency} simulation={simulations} density={simulationDensity} capital={capital} fullRange={showFullRange} />
+            <MonteCarloChart currency={currency} simulation={simulations} density={simulationDensity} capital={capital} fullRange={showFullRange} /></>}
+            {view==='3D probability surface' && <SurfaceView dark={dark} onUnavailable={()=>{setGraphicsFailed(true);setView('2D trajectories')}} data={{x:simulations.density.sessions,y:simulations.density.centers,z:simulations.density.rows,labels:['Trading sessions',`Value (${currency ?? 'units'})`,`Density (1/${currency ?? 'unit'})`],curves:([{key:'p05',label:'5th percentile',color:'#e0b064'},{key:'median',label:'Median',color:'#a4d7ff'},{key:'p95',label:'95th percentile',color:'#cb8bdc'}] as const).map(c=>({...c,values:simulations.density.sessions.map(i=>simulations.fan[i][c.key])}))}}/>}
+            {view==='Terminal distribution' && <><ChartContainer config={chartConfig} className="advanced-chart"><BarChart accessibilityLayer data={makeHistogram(simulations.terminalReturns,20)}><CartesianGrid vertical={false}/><XAxis dataKey="bin" minTickGap={24}/><YAxis allowDecimals={false}/><Tooltip/><Bar dataKey="count" name="Paths" fill="var(--color-return)"/></BarChart></ChartContainer><p className="method-note">Terminal return (%) · counts across all {simulations.paths} paths.</p><details><summary>Distribution table</summary><table className="data-table"><thead><tr><th>Return midpoint</th><th>Paths</th></tr></thead><tbody>{makeHistogram(simulations.terminalReturns,20).map((b,i)=><tr key={i}><td>{b.bin}</td><td>{b.count}</td></tr>)}</tbody></table></details></>}
           </> : <div className="chart-placeholder simulation-empty" role="status">{simulationStatus}</div>}
         </Panel>
       </>}

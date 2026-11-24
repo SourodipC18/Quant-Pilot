@@ -352,6 +352,28 @@ npm run build
 
 ---
 
+## Phase 6C.1 — Advanced 3D analytics
+
+**Monte Carlo → Simulation universe.** Select an instrument, sample allocation, saved portfolio or the read-only paper account. The seed, horizon and path count control a daily historical bootstrap (20–504 sessions, 100–2,000 paths). Switch between trajectories, a time/value probability-density surface and terminal return counts. Each density slice uses all paths and integrates to one across equal-width value bins. Only the rendered time grid and trajectory cloud are thinned. Expected ending value is the arithmetic mean; downside risk includes the fifth percentile of path maximum drawdowns.
+
+Portfolio draws preserve same-session cross-asset dependence: each matched return vector is projected onto fixed weights before sampling. Samples use target allocations; saved and paper positions use share counts times closing prices on the latest aligned return date. Saved portfolios assume no idle cash; paper cash remains a zero-return allocation. These are daily rebalanced scenarios, not reconstructions of historical trades. Mixed currencies are not converted. Paper trading retains its existing USD-only rules; verified USD and INR histories use the existing Twelve Data and Upstox routes.
+
+**Strategy Lab → Strategy optimization.** Set the fast and slow ranges, integer step and ranking metric, then evaluate up to 144 pairs. The existing SMA/EMA backtester runs on the first 70% of at most 1,000 chronological bars. Only training scores determine the winner; a fresh, flat account tests that pair on the final 30%, including its own indicator warm-up. Costs and next-bar execution match the configured strategy. Undefined scores are unavailable rather than zero. The heatmap, 3D mesh, comparison table and CSV expose the same training grid. Historical selection is not evidence of future performance.
+
+Both 3D surfaces load on demand and reuse the Efficient Frontier’s camera and axis components. Rotate, zoom, reset or enter fullscreen; 2D alternatives remain available without WebGL.
+
+## Phase 6C.2 — Portfolio Risk Lab
+
+Open **Analysis tools → Portfolio Risk Lab** or send a sample allocation there from the sample library. Select a sample, saved portfolio, or paper account and a six-month, one-year, or three-year lookback. The lab uses verified USD or INR daily closes from Twelve Data (split adjusted) or Upstox (as reported). Saved portfolios use the latest shared close to mark their shares; paper portfolios include idle USD cash with zero return. Samples use their target weights. Currencies are not converted or combined, and holdings are never silently dropped.
+
+**Stress testing.** Choose two holdings, set shock bounds, and inspect the selected scenario’s ending value and constituent P&L. Unselected holdings and cash are flat under hypothetical holding shocks. Alternatively, choose two market proxies: holding-level OLS betas are fit jointly using at least 60 same-session observations. Proxy shocks exclude the intercept and cannot imply a loss of more than a holding’s full value. Proxy shocks do not reproduce a historical event or estimate a causal response.
+
+**Historical replay.** Financial crisis, COVID-19 crash, rate tightening, and technology selloff presets supply editable date windows, not fixed shock percentages. Replay derives each holding’s move from common provider closes within seven calendar days of both bounds; if even one holding lacks coverage, the replay is unavailable. The replay uses current weights, so it is not a backtest of historical ownership. Changing either observed axis shock creates a hypothetical overlay while other holdings keep their observed returns. Price-only results omit dividends, fees, liquidity, and execution effects.
+
+**Rolling correlation and risk.** Pearson coefficients use 30, 60, 90, or 252 contiguous matched sessions; no window crosses missing returns or reports a coefficient for zero variance. The dashboard shows the highest observed coefficient for the selected period and window. Volatility is annualized using 252 sessions (minimum 30 observed returns); one-day 95% VaR uses the empirical fifth percentile and CVaR averages the worst 5% of observed sessions (both require 100 returns). Drawdown is the worst peak-to-trough loss across uninterrupted spans of at least 30 returns. These figures use a fixed-weight, daily-rebalanced hypothetical portfolio, not recorded trade history.
+
+Both charts support fullscreen, keyboard-accessible 2D inspection, hover detail, and CSV export. In 3D you can rotate, zoom, and reset the camera. Correlation uses a fixed −1 to +1 scale; its 3D view thins rendered dates, while the paged heatmap and CSV keep every window for the selected pairs. A WebGL failure returns to the 2D chart. Historical coverage varies with listing age, provider subscription, and configuration. Live INR requires `UPSTOX_ANALYTICS_TOKEN`. Paper trading remains USD-only.
+
 ## Quantitative Methodologies
 
 QuantPilot incorporates established financial and statistical methodologies.
