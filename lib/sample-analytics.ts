@@ -17,11 +17,14 @@ export type SampleSeries = { coverage: SampleCoverage; points: PricePoint[]; syn
 
 const marketClocks = Object.fromEntries(Object.entries({ USD: 'America/New_York', INR: 'Asia/Kolkata' }).map(([currency, timeZone]) => [currency, new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })]))
 
-export function readSampleHistory(symbol: string, currency: SampleCurrency, history: SampleHistory, now = new Date()): SampleSeries {
+export function readSampleHistory(symbol: string, currency: SampleCurrency, history: SampleHistory, now = new Date(), allowPlainListing = false): SampleSeries {
   const listing = symbolParts(symbol)
   const expectedProvider = providerForSymbol(symbol)
   const meta = history.meta
-  const matchesListing = meta?.symbol === listing.symbol && (expectedProvider === 'upstox' ? meta?.exchange === listing.exchange : meta?.mic_code === listing.exchange?.slice(1))
+  const matchesListing = meta?.symbol === listing.symbol && (expectedProvider === 'upstox'
+    ? meta?.exchange === listing.exchange || (allowPlainListing && ({ XNSE: 'NSE', '@XNSE': 'NSE', XBOM: 'BSE', '@XBOM': 'BSE' } as Record<string, string>)[listing.exchange ?? ''] === meta?.exchange && typeof meta?.exchange === 'string')
+    : listing.exchange?.startsWith('@') ? meta?.mic_code === listing.exchange.slice(1)
+      : allowPlainListing && typeof meta?.exchange === 'string' && (!listing.exchange || meta.exchange.toUpperCase() === listing.exchange))
   if (history.source !== expectedProvider || history.interval !== '1day' || history.adjustment !== sampleAdjustment(symbol) || meta?.currency !== currency || !matchesListing) {
     return unavailableSampleHistory(symbol, 'The provider did not verify this listing, currency, or history type.')
   }

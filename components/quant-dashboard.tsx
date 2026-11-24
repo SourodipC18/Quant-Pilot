@@ -13,6 +13,7 @@ import { paperEndpoint, paperPortfolioEndpoint } from '@/components/paper-order-
 import { PAPER_PORTFOLIO, portfolioHoldingsFor, type PortfolioHolding, type PortfolioOption } from '@/lib/portfolio-adapter'
 import type { PaperPortfolio } from '@/lib/paper-trading-types'
 import { AdvancedAnalyticsView, analyticsTabs, type AnalyticsTab } from '@/components/advanced-analytics-view'
+import { PortfolioRiskLab } from '@/components/portfolio-risk-lab'
 import { DataQualityView } from '@/components/data-quality-view'
 import { emptyMarketDates, MarketDateRange, withMarketDates } from '@/components/market-date-range'
 import { simulationPortfolio } from '@/lib/simulation-portfolio'
@@ -28,7 +29,7 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, Referen
 import { authClient } from '@/lib/auth-client'
 import { alignedReturns, annualizedVolatility, BacktestConfig, BacktestResult, bollingerBands, dailyReturns, DEFAULT_BACKTEST_CONFIG, historicalCVaR, historicalVaR, macdSeries, maxDrawdown, optimizePortfolio, periodReturn, portfolioAttribution, portfolioShareValue, rebalanceProposal, regressionRiskMetrics, relativeStrengthIndex, simpleMovingAverage, runBacktest, sharpeRatio, sortinoRatio, type PortfolioOptimization } from '@/lib/analytics'
 
-type WorkspaceKey = 'Overview' | 'Research' | 'Strategy Lab' | 'Trading' | 'Sample Portfolios' | 'Portfolio Risk' | 'Optimization Lab' | 'Research Studio' | 'Correlation' | 'Experiments' | 'Watchlist' | 'Data Quality' | AnalyticsTab
+type WorkspaceKey = 'Overview' | 'Research' | 'Strategy Lab' | 'Trading' | 'Sample Portfolios' | 'Portfolio Risk' | 'Portfolio Risk Lab' | 'Optimization Lab' | 'Research Studio' | 'Correlation' | 'Experiments' | 'Watchlist' | 'Data Quality' | AnalyticsTab
 type NumericBar = { datetime: string; open: number; high: number; low: number; close: number; volume: number | null }
 type SavedItem = { id: string; name: string; createdAt: string }
 type BacktestItem = SavedItem & { symbol: string; metrics?: Record<string, unknown>; config?: BacktestConfig; equity?: { datetime: string; value: number; benchmark: number }[]; trades?: unknown[] }
@@ -56,7 +57,7 @@ const popular: Instrument[] = [{ symbol: 'AAPL', instrument_name: 'Apple Inc.', 
 type NavigationItem = { key: WorkspaceKey; icon: typeof LayoutDashboard; label: string }
 const navGroups: { label: string; items: NavigationItem[] }[] = [
   { label: 'Workspace', items: [{ key: 'Overview', icon: LayoutDashboard, label: 'Overview' }, { key: 'Research', icon: Search, label: 'Research workbench' }, { key: 'Strategy Lab', icon: FlaskConical, label: 'Strategy lab' }, { key: 'Trading', icon: ArrowLeftRight, label: 'Trading' }, { key: 'Sample Portfolios', icon: BarChart3, label: 'Sample Portfolios' }, { key: 'Portfolio Risk', icon: Wallet, label: 'Portfolio risk' }, { key: 'Optimization Lab', icon: SlidersHorizontal, label: 'Optimization Lab' }, { key: 'Research Studio', icon: Microscope, label: 'Research Studio' }] },
-  { label: 'Analysis tools', items: [...analyticsTabs.map(({ label, icon }) => ({ key: label, icon, label })), { key: 'Correlation', icon: Activity, label: 'Correlation' }] },
+  { label: 'Analysis tools', items: [...analyticsTabs.map(({ label, icon }) => ({ key: label, icon, label })), { key: 'Correlation', icon: Activity, label: 'Correlation' }, { key: 'Portfolio Risk Lab', icon: ShieldAlert, label: 'Portfolio Risk Lab' }] },
   { label: 'Saved work', items: [{ key: 'Experiments', icon: Activity, label: 'Experiments' }, { key: 'Watchlist', icon: Star, label: 'Watchlist' }, { key: 'Data Quality', icon: Database, label: 'Data quality' }] },
 ]
 function isAnalyticsTab(key: WorkspaceKey): key is AnalyticsTab {
@@ -69,6 +70,7 @@ const pageDescriptions: Record<Exclude<WorkspaceKey, AnalyticsTab>, string> = {
   'Trading': 'Practice stock and ETF trading with virtual capital and verified market prices.',
   'Sample Portfolios': 'Inspect illustrative allocations, check historical coverage, and take a sample into your research tools.',
   'Portfolio Risk': 'Track holdings, portfolio-level returns, and historical tail risk.',
+  'Portfolio Risk Lab': 'Explore two-axis stress scenarios, portfolio tail risk, and changing correlations across your holdings.',
   Correlation: 'Compare the daily return relationships between holdings in an illustrative portfolio.',
   'Optimization Lab': 'Explore risk, return, and Sharpe trade-offs for saved portfolios or simulated positions.',
   'Research Studio': 'Test research methods on historical data, then export or interpret the evidence.',
@@ -121,7 +123,7 @@ export function QuantDashboard({ user, initialView }: { user: { name: string; em
   const sampleHistory = useSampleHistory(activeSample && ['Portfolio Risk', 'Correlation', 'Monte Carlo'].includes(active) ? activeSample : undefined)
   const [mcPortfolioId, setMcPortfolioId] = useState('')
   const mcPortfolio = active === 'Monte Carlo' && !activeSample && Boolean(mcPortfolioId)
-  const needsInstrument = !mcPortfolio && !['Trading', 'Sample Portfolios', 'Correlation', 'Optimization Lab', 'Research Studio'].includes(active) && !activeSample
+  const needsInstrument = !mcPortfolio && !['Trading', 'Sample Portfolios', 'Correlation', 'Portfolio Risk Lab', 'Optimization Lab', 'Research Studio'].includes(active) && !activeSample
 
   function analyzeSample(destination: SampleDestination, sample: SamplePortfolio) {
     setSelectedSample(sample)
@@ -266,6 +268,8 @@ export function QuantDashboard({ user, initialView }: { user: { name: string; em
       {active === 'Strategy Lab' && <StrategySurface key={`${selectedSymbol}:${JSON.stringify(config)}`} bars={pricePoints} config={config} dark={isDark} source={`${selectedSymbol} · ${pricedInstrument.exchange ?? 'Exchange unavailable'} · ${pricedInstrument.currency ?? 'Currency unavailable'} · ${historyResponse?.source ? PROVIDER_LABELS[historyResponse.source] : 'Awaiting history'}`} />}
       {active === 'Monte Carlo' && <AppPanel title="Simulation universe" eyebrow="Historical bootstrap"><label className="analytics-field">Instrument or portfolio<select value={activeSample ? `sample:${activeSample.id}` : mcPortfolioId} onChange={e=>{const id=e.target.value;setSelectedSample(sampleOptions.find(s=>`sample:${s.id}`===id));setMcPortfolioId(id.startsWith('sample:')?'':id)}}><option value="">Selected stock · {selectedSymbol}</option><optgroup label="Sample allocations">{sampleOptions.map(s=><option key={s.id} value={`sample:${s.id}`}>{s.name} · {s.currency}</option>)}</optgroup><optgroup label="Workspace portfolios">{portfolioOptions?.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</optgroup></select></label><p className="method-note">{activeSample ? `${activeSample.holdings.map(h=>h.symbol).join(', ')} · ${PROVIDER_LABELS[providerForSymbol(activeSample.holdings[0].symbol)]} · ${sampleHistory.analytics?.series[0]?.datetime ?? '—'} to ${sampleHistory.analytics?.valuationDate ?? '—'} · Target allocation; no cash reserve.` : mcPortfolio ? `${holdingData?.sources ?? 'Awaiting verified holdings history'} · ${mcInputs?.start ?? '—'} to ${mcInputs?.end ?? '—'}. ${isPaperPortfolio ? `Idle cash (${((mcInputs?.cashWeight ?? 0)*100).toFixed(1)}% of marked equity) earns zero return.` : 'Saved positions are fully invested; no cash ledger is assumed.'}` : `${historyResponse?.source ? PROVIDER_LABELS[historyResponse.source] : 'Awaiting history'} · ${visibleBars[0]?.datetime ?? '—'} to ${visibleBars.at(-1)?.datetime ?? '—'}`}</p></AppPanel>}
       {sampleEnabled && active !== 'Monte Carlo' && <SampleAnalysisSource sample={activeSample} available={sampleOptions} tool={active} onChange={id => setSelectedSample(id === selectedSample?.id ? selectedSample : SAMPLE_PORTFOLIOS.find(sample => sample.id === id))} onBrowse={browseSamples} />}
+      {active === 'Portfolio Risk' && <div className="panel research-shortcut"><div><strong>Model portfolio risk in 3D</strong><p>Compare shocks, replay market events, and monitor rolling correlations.</p></div><button type="button" className="button" onClick={() => setActive('Portfolio Risk Lab')}>Open Portfolio Risk Lab <ArrowRight size={14} aria-hidden="true" /></button></div>}
+      {active === 'Portfolio Risk Lab' && <PortfolioRiskLab samples={sampleOptions} initialSample={selectedSample} portfolios={portfolioOptions} holdings={workspace?.holdings} dark={isDark} />}
       {active === 'Portfolio Risk' && activeSample && <SampleRiskPanel sample={activeSample} history={sampleHistory} />}
       {active === 'Correlation' && <SampleCorrelationPanel sample={activeSample} history={sampleHistory} />}
       {active === 'Stress lab' && activeSample && <SampleStressPanel key={activeSample.id} sample={activeSample} />}

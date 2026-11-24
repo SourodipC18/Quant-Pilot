@@ -1,7 +1,7 @@
 'use client'
-import { Canvas } from '@react-three/fiber'
-import { Color, DoubleSide } from 'three'
-import { useMemo } from 'react'
+import { Canvas, useThree } from '@react-three/fiber'
+import { Color, DoubleSide, PerspectiveCamera } from 'three'
+import { useEffect, useMemo } from 'react'
 import {
   Orbit,
   AxisLabel,
@@ -13,6 +13,18 @@ import {
   cameraPosition,
 } from './optimization-frontier-3d'
 import type { SurfaceData } from './surface-view'
+
+function ResponsiveFraming() {
+  const { camera, size, invalidate } = useThree()
+  useEffect(() => {
+    if (!(camera instanceof PerspectiveCamera)) return
+    const aspect = Math.max(0.4, size.width / Math.max(1, size.height))
+    const halfFov = Math.min(Math.PI / 5, Math.max(Math.PI / 9, Math.atan(Math.tan(Math.PI / 9) / aspect)))
+    camera.setFocalLength(camera.getFilmHeight() / (2 * Math.tan(halfFov)))
+    invalidate()
+  }, [camera, size.width, size.height, invalidate])
+  return null
+}
 
 export default function SurfaceScene({
   data,
@@ -27,18 +39,22 @@ export default function SurfaceScene({
   hover: (s: string) => void
   fail: () => void
 }) {
-  const { x, y, z, labels } = data,
+  const { x, y, z, labels, scale, ticks, describe, formatValue, linearAxes } = data,
     theme = colorSets[dark ? 'dark' : 'light']
   const mesh = useMemo(() => {
     const finite = z
         .flat()
         .filter((v): v is number => v != null && Number.isFinite(v)),
-      min = Math.min(...finite),
-      max = Math.max(...finite)
+      min = scale ? -scale.extent : Math.min(...finite),
+      max = scale ? scale.extent : Math.max(...finite)
+    const stops = scale?.colors.map(color => new Color(color))
+    const relative = (axis: number[], index: number) => linearAxes && axis.length > 1
+      ? (axis[index] - axis[0]) / (axis.at(-1)! - axis[0])
+      : index / Math.max(1, axis.length - 1)
     const xyz = (i: number, j: number, v: number): [number, number, number] => [
-      (5 * i) / Math.max(1, x.length - 1),
+      5 * relative(x, i),
       max > min ? (3.6 * (v - min)) / (max - min) : 1.8,
-      (4 * j) / Math.max(1, y.length - 1),
+      4 * relative(y, j),
     ]
     const pos: number[] = [],
       colors: number[] = [],
@@ -50,7 +66,7 @@ export default function SurfaceScene({
           idx = i * y.length + j
         pos.push(...xyz(i, j, v ?? min))
         colors.push(
-          ...new Color()
+          ...(scale && stops ? stops[1].clone().lerp(stops[(v ?? 0) < 0 ? 0 : 2], Math.min(1, Math.abs(v ?? 0) / scale.extent)) : new Color()
             .setHSL(
               0.58 -
                 0.34 *
@@ -58,7 +74,7 @@ export default function SurfaceScene({
               0.57,
               dark ? 0.51 : 0.37,
             )
-            .toArray(),
+          ).toArray(),
         )
         if (v != null) available.push(idx)
         if (i && j) {
@@ -87,13 +103,12 @@ export default function SurfaceScene({
       min,
       max,
     }
-  }, [x, y, z, dark])
+  }, [x, y, z, dark, scale, linearAxes])
   const detail = (k: number) => {
-    const i = Math.floor(k / y.length),
-      j = k % y.length
-    hover(
-      `${labels[0]}: ${x[i]} · ${labels[1]}: ${Number(y[j].toPrecision(6))} · ${labels[2]}: ${Number(z[i][j]!.toPrecision(5))}`,
-    )
+    const i = Math.floor(k / y.length), j = k % y.length
+    const value = z[i]?.[j]
+    if (value == null) return
+    hover(describe?.(i, j, value) ?? `${labels[0]}: ${ticks?.[0][i] ?? x[i]} · ${labels[1]}: ${ticks?.[1][j] ?? Number(y[j].toPrecision(6))} · ${labels[2]}: ${formatValue?.(value) ?? Number(value.toPrecision(5))}`)
   }
   return (
     <Canvas
@@ -101,6 +116,7 @@ export default function SurfaceScene({
       dpr={[1, 1.5]}
       camera={{ position: cameraPosition, fov: 40 }}
     >
+      {linearAxes && <ResponsiveFraming />}
       <Orbit reset={reset} />
       <ContextLoss onUnavailable={fail} />
       <Lines positions={grid} color={theme.grid} />
@@ -128,6 +144,10 @@ export default function SurfaceScene({
         </bufferGeometry>
         <meshBasicMaterial vertexColors side={DoubleSide} />
       </mesh>
+      {y.length === 1 && <Lines color={theme.text} positions={new Float32Array(z.slice(1).flatMap(([v], i) => {
+        const previous = z[i][0]
+        return v == null || previous == null ? [] : [...mesh.xyz(i, 0, previous), ...mesh.xyz(i + 1, 0, v)]
+      }))} />}
       <points
         onPointerMove={(e) => {
           if (e.index != null) detail(e.index)
@@ -192,25 +212,15 @@ export default function SurfaceScene({
         color={theme.text}
         title
       />
-      {[0, 1].map((t) => (
-        <group key={t}>
-          <AxisLabel
-            position={[5 * t, -0.15, 0]}
-            text={String(x[t ? x.length - 1 : 0])}
-            color={theme.text}
-          />
-          <AxisLabel
-            position={[-0.55, 0, 4 * t]}
-            text={Number(y[t ? y.length - 1 : 0].toPrecision(4)).toString()}
-            color={theme.text}
-          />
-          <AxisLabel
-            position={[-0.55, 3.6 * t, 0]}
-            text={Number((t ? mesh.max : mesh.min).toPrecision(4)).toString()}
-            color={theme.text}
-          />
+      {[0, 1].map((t) => {
+        const i = t ? x.length - 1 : 0, j = t ? y.length - 1 : 0
+        const value = t ? mesh.max : mesh.min
+        return <group key={t}>
+          {(!t || x.length > 1) && <AxisLabel position={[5 * t, -0.15, 0]} text={ticks?.[0][i] ?? String(x[i])} color={theme.text} />}
+          {(!t || y.length > 1) && <AxisLabel position={[-0.55, 0, 4 * t]} text={ticks?.[1][j] ?? Number(y[j].toPrecision(4)).toString()} color={theme.text} />}
+          <AxisLabel position={[-0.55, 3.6 * t, 0]} text={formatValue?.(value) ?? Number(value.toPrecision(4)).toString()} color={theme.text} />
         </group>
-      ))}
+      })}
     </Canvas>
   )
 }

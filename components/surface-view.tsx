@@ -6,6 +6,11 @@ export type SurfaceData = {
   y: number[]
   z: (number | null)[][]
   labels: [string, string, string]
+  ticks?: [string[], string[]]
+  linearAxes?: boolean
+  formatValue?: (value: number) => string
+  describe?: (i: number, j: number, value: number) => string
+  scale?: { extent: number; colors: [string, string, string]; legend: string }
   markers?: { i: number; j: number; color: string; label: string }[]
   curves?: { values: number[]; color: string; label: string }[]
 }
@@ -32,10 +37,12 @@ export function SurfaceView({
   data,
   dark,
   onUnavailable,
+  embedded = false,
 }: {
   data: SurfaceData
   dark: boolean
   onUnavailable: () => void
+  embedded?: boolean
 }) {
   const [reset, setReset] = useState(0),
     [tip, setTip] = useState(''),
@@ -52,7 +59,7 @@ export function SurfaceView({
         >
           Reset camera
         </button>
-        <button
+        {!embedded && <button
           type="button"
           className="button small"
           onClick={async () => {
@@ -65,7 +72,7 @@ export function SurfaceView({
           }}
         >
           Fullscreen
-        </button>
+        </button>}
       </div>
       <div
         style={{ height: 'clamp(310px, 53vh, 680px)' }}
@@ -84,7 +91,7 @@ export function SurfaceView({
       <p className="method-note">
         {tip || 'Drag to rotate · Scroll or pinch to zoom · Point to inspect'}
       </p>
-      <p className="method-note">
+      {!embedded && <p className="method-note">
         <span
           aria-hidden="true"
           style={{
@@ -101,7 +108,7 @@ export function SurfaceView({
             · <b style={{ color: m.color }}>━</b> {m.label}
           </span>
         ))}
-      </p>
+      </p>}
     </div>
   )
 }

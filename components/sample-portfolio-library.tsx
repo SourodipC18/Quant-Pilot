@@ -10,8 +10,8 @@ import { SamplePaperPanel } from '@/components/sample-paper-panel'
 import { useSampleHistory } from '@/components/use-sample-history'
 
 const marketName = (currency: string) => currency === 'USD' ? 'United States' : 'India'
-export type SampleDestination = 'Portfolio Risk' | 'Optimization Lab' | 'Monte Carlo' | 'Correlation' | 'Stress lab' | 'Research Studio'
-const destinations: SampleDestination[] = ['Portfolio Risk', 'Optimization Lab', 'Monte Carlo', 'Correlation', 'Stress lab', 'Research Studio']
+export type SampleDestination = 'Portfolio Risk' | 'Portfolio Risk Lab' | 'Optimization Lab' | 'Monte Carlo' | 'Correlation' | 'Stress lab' | 'Research Studio'
+const destinations: SampleDestination[] = ['Portfolio Risk', 'Portfolio Risk Lab', 'Optimization Lab', 'Monte Carlo', 'Correlation', 'Stress lab', 'Research Studio']
 
 export function SamplePortfolioLibrary({ draft, onDraft, workspaceReady, onSave, onAnalyze, onPaper }: {
   draft?: SamplePortfolio; onDraft: (value?: SamplePortfolio) => void; workspaceReady: boolean;
