@@ -8,9 +8,10 @@ export type SurfaceData = {
   labels: [string, string, string]
   ticks?: [string[], string[]]
   linearAxes?: boolean
+  connectX?: boolean[][]
   formatValue?: (value: number) => string
   describe?: (i: number, j: number, value: number) => string
-  scale?: { extent: number; colors: [string, string, string]; legend: string }
+  scale?: { extent: number; colors: [string, string, string]; legend: string; domain?: 'positive' | 'negative' }
   markers?: { i: number; j: number; color: string; label: string }[]
   curves?: { values: number[]; color: string; label: string }[]
 }

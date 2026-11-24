@@ -372,7 +372,23 @@ h2 { margin: 4px 0 0; font-size: 13px; letter-spacing: -.015em; font-weight: 650
 .risk-ledger :is(th, td) { text-align: right; padding: 7px; border-bottom: 1px solid var(--border); }
 .risk-ledger th:first-child { text-align: left; }
 .risk-ledger thead { color: var(--muted); }
-@media (max-width: 620px) { .risk-source-fields { grid-template-columns: 1fr; } .risk-reload { justify-self: start; } }
+.risk-instrument-form { display: grid; grid-template-columns: minmax(0, 260px) auto; align-items: end; justify-content: start; }
+.advanced-risk-tabs { display: flex; flex-wrap: wrap; gap: 6px; width: fit-content; }
+.advanced-risk-tabs button { min-height: 36px; padding: 5px 10px; }
+.advanced-risk-tabs button[aria-pressed='true'] { border-color: var(--accent-blue); color: var(--foreground); }
+.advanced-risk-windows { min-width: 0; margin: 0; border: 0; padding: 0; }
+.advanced-risk-windows legend { padding: 0; margin-bottom: 6px; color: var(--muted); font-size: 11px; }
+.advanced-risk-windows > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.advanced-risk-windows label { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); font-size: 12px; }
+.advanced-risk-windows input { accent-color: var(--accent-blue); }
+.advanced-risk-heading { margin: 2px 0 0; font-size: 14px; }
+.advanced-risk-factors { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 195px), 1fr)); gap: 8px; }
+.advanced-risk-factors article { display: grid; gap: 3px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; overflow-wrap: anywhere; }
+.advanced-risk-factors a { color: var(--accent-blue); text-decoration: underline; text-underline-offset: 3px; }
+.advanced-drawdown-line { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 8px; margin-top: 14px; }
+.advanced-drawdown-line h3 { margin: 0; font-size: 14px; }
+.advanced-drawdown-plot { width: 100%; min-width: 0; aspect-ratio: auto; height: clamp(230px, 36vh, 420px); }
+@media (max-width: 620px) { .risk-source-fields, .risk-instrument-form { grid-template-columns: 1fr; justify-content: stretch; } .risk-reload { justify-self: start; } }
 .range-tabs:is([aria-label="Strategy visualization"], [aria-label="Simulation visualization"]) { display: flex; flex-wrap: wrap; gap: 4px; width: fit-content; margin-block: 10px; }
 .range-tabs:is([aria-label="Strategy visualization"], [aria-label="Simulation visualization"]) button { height: auto; min-height: 34px; padding: 6px 12px; font-size: 12px; }
 .range-tabs:is([aria-label="Strategy visualization"], [aria-label="Simulation visualization"]) .active { border-bottom: 2px solid var(--foreground); }

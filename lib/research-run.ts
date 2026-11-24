@@ -5,6 +5,7 @@ import { marketDataProvider, validateHistory, type ProviderHistory } from './mar
 import { displayPercent as pct, methodInfo, type EvidenceChart, type ResearchEvidence } from './research-evidence'
 import { allocationError, SAMPLE_HISTORY_SIZE } from './sample-portfolios'
 import { readSampleHistory } from './sample-analytics'
+import { RESEARCH_PROXIES } from './risk-proxies'
 import { alignDailyReturns, bootstrapScenarios, evaluateForecast, fitFactors, marketRegimes, quantile, REGIME_LABELS, type PriceObservation } from './research-methods'
 
 const symbol = z.string().trim().toUpperCase().regex(SYMBOL_PATTERN)
@@ -18,16 +19,6 @@ export const researchInput = z.discriminatedUnion('method', [
 export type ResearchInput = z.input<typeof researchInput>
 export class ResearchUnavailable extends Error {}
 
-const proxyDefinitions = [
-  { symbol: 'SPY', label: 'State Street / SPY', url: 'https://www.ssga.com/us/en/intermediary/etfs/spdr-sp-500-etf-trust-spy' },
-  { symbol: 'IWM', label: 'iShares / IWM', url: 'https://www.ishares.com/us/products/239710/ishares-russell-2000-etf' },
-  { symbol: 'QQQ', label: 'Invesco / QQQ', url: 'https://www.invesco.com/qqq-etf/en/home.html' },
-]
-const indiaProxyDefinitions = [
-  { symbol: 'NIFTYBEES:NSE', label: 'Nippon India / NIFTYBEES', url: 'https://www.nseindia.com/get-quotes/equity?symbol=NIFTYBEES' },
-  { symbol: 'JUNIORBEES:NSE', label: 'Nippon India / JUNIORBEES', url: 'https://www.nseindia.com/get-quotes/equity?symbol=JUNIORBEES' },
-  { symbol: 'BANKBEES:NSE', label: 'Nippon India / BANKBEES', url: 'https://www.nseindia.com/get-quotes/equity?symbol=BANKBEES' },
-]
 const fixed = (value: number, places = 3) => value.toFixed(places)
 const asPercent = (value: number) => value * 100
 const narrow = <T,>(points: T[], limit = 60) => points.length <= limit ? points : Array.from({ length: limit }, (_, i) => points[Math.round((i * (points.length - 1)) / (limit - 1))])
@@ -48,7 +39,7 @@ export async function runResearch(input: ResearchInput, history = marketDataProv
     const invalid = allocationError(sampleCurrency, symbols.map((symbol, index) => ({ symbol, weightBps: sampleWeights[index] })))
     if (invalid) throw new ResearchUnavailable(invalid)
   } else if (input.method === 'scenarios' && symbols.length > 5) throw new ResearchUnavailable('Enter up to five symbols or choose a weighted sample portfolio.')
-  const definitions = indian ? indiaProxyDefinitions : proxyDefinitions
+  const definitions = RESEARCH_PROXIES[sampleCurrency]
   const proxies = definitions.map(proxy => proxy.symbol)
   const proxyTickers = proxies.map(ticker => symbolParts(ticker).symbol)
   if (input.method === 'factors' && symbols.some(ticker => proxyTickers.includes(symbolParts(ticker).symbol))) throw new ResearchUnavailable(`Choose targets other than ${proxyTickers.join(', ')} to keep the selected ETFs separate from the target.`)
@@ -121,7 +112,7 @@ export async function runResearch(input: ResearchInput, history = marketDataProv
     report.assumptions.push(`Daily ordinary least squares with an intercept. ${indian ? 'NIFTYBEES (Nifty 50) proxies the broad market; JUNIORBEES (Nifty Next 50) minus NIFTYBEES proxies next-50 tilt; BANKBEES (Nifty Bank) minus NIFTYBEES proxies banking tilt.' : 'SPY (S&P 500 ETF) proxies the broad market; IWM (Russell 2000 ETF) minus SPY proxies small-cap tilt; QQQ (Nasdaq-100 ETF) minus SPY proxies Nasdaq tilt.'} These are price-return spreads, not academic or excess-return factors.`)
     report.limitations.push('Exposure is statistical association, not causality. Coefficient standard errors assume independent, constant-variance residuals and are descriptive, not significance tests.')
     if (offset > 1) report.assumptions.push('The target is a hypothetical equal-weight portfolio, rebalanced daily.')
-    report.references = definitions.map(({ label, url }) => ({ label, url }))
+    report.references = definitions.map(({ name: label, url }) => ({ label, url }))
     report.tables.push({ caption: 'Factor exposures', headers: ['Daily ETF proxy', 'Coefficient', 'OLS std. error'], rows: [`Market / ${market}`, `${indian ? 'Next-50' : 'Small-cap'} tilt / ${secondary} - ${market}`, `${indian ? 'Banking' : 'Nasdaq'} tilt / ${tertiary} - ${market}`].map((name, index) => [name, fixed(fit.coefficients[index]), fixed(fit.standardErrors[index])]) })
     report.charts.push({ title: 'Recent realized and fitted daily returns', series: ['Observed', 'OLS fitted'], unit: 'percent', points: rows.slice(-60).map((row, index, recent) => { const i = rows.length - recent.length + index; return { label: row.date, primary: asPercent(y[i]), secondary: asPercent(fit.fitted[i]) } }) })
   } else if (input.method === 'forecast') {
