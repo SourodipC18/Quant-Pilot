@@ -16,7 +16,7 @@ const colorSets = {
   light: { grid: '#c8d6ca', text: '#3b4e42', candidate: '#62796b', frontier: '#477b32', current: '#273b2c', minimum: '#296aa5', sharpe: '#935e14' },
 }
 
-function Orbit({ reset }: { reset: number }) {
+export function Orbit({ reset }: { reset: number }) {
   const { camera, gl, invalidate } = useThree()
   const controls = useRef<OrbitControls | null>(null)
   useEffect(() => {
@@ -38,7 +38,7 @@ function Orbit({ reset }: { reset: number }) {
   return null
 }
 
-function AxisLabel({ position, text, color, title = false }: { position: Vector; text: string; color: string; title?: boolean }) {
+export function AxisLabel({ position, text, color, title = false }: { position: Vector; text: string; color: string; title?: boolean }) {
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas')
     canvas.width = 512
@@ -127,7 +127,8 @@ export default function OptimizationFrontier3D({ points, frontier, dark, reset, 
   </div>
 }
 
-function ContextLoss({ onUnavailable }: { onUnavailable: () => void }) {
+export { Lines, grid, axes, colorSets, cameraPosition }
+export function ContextLoss({ onUnavailable }: { onUnavailable: () => void }) {
   const canvas = useThree(state => state.gl.domElement)
   useEffect(() => {
     canvas.addEventListener('webglcontextlost', onUnavailable)

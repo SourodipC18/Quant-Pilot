@@ -202,7 +202,7 @@ export function walkForwardValidation(input: PricePoint[], config: BacktestConfi
   return folds
 }
 
-export type MonteCarloResult = { fan: { step: number; p05: number; median: number; p95: number }[]; trajectories: number[][]; terminalP05: number | null; terminalMedian: number | null; terminalP95: number | null; probabilityOfLoss: number | null; maxDrawdownP05: number | null; paths: number; steps: number }
+export type MonteCarloResult = { density: { sessions: number[]; centers: number[]; width: number; rows: number[][] }; terminalReturns: number[]; expectedTerminal: number | null; fan: { step: number; p05: number; median: number; p95: number }[]; trajectories: number[][]; terminalP05: number | null; terminalMedian: number | null; terminalP95: number | null; probabilityOfLoss: number | null; maxDrawdownP05: number | null; paths: number; steps: number }
 export type OptimizationAsset = { symbol: string; points: PricePoint[] }
 export type OptimizationConstraint = { minWeight?: number; maxWeight?: number; step?: number; targetReturn?: number }
 export type OptimizationPoint = { weights: number[]; expectedReturn: number; volatility: number; sharpe: number | null }
@@ -216,13 +216,13 @@ export function portfolioAttribution(weights: number[], assetReturns: number[][]
 export function rebalanceProposal(currentWeights: number[], targetWeights: number[], threshold = 0.05) { return targetWeights.map((target, index) => ({ index, currentWeight: currentWeights[index] ?? 0, targetWeight: target, drift: (currentWeights[index] ?? 0) - target, action: Math.abs((currentWeights[index] ?? 0) - target) >= threshold ? target > (currentWeights[index] ?? 0) ? 'increase' : 'decrease' : 'hold' as const })).filter(item => item.action !== 'hold') }
 
 export function monteCarloBootstrap(returns: number[], initialCapital: number, steps = 252, paths = 1000, seed = 42, displayedPaths = 240): MonteCarloResult {
-  if (returns.length < 2 || !Number.isFinite(initialCapital) || initialCapital <= 0 || !Number.isInteger(steps) || steps < 1 || !Number.isInteger(paths) || paths < 1) return { fan: [], trajectories: [], terminalP05: null, terminalMedian: null, terminalP95: null, probabilityOfLoss: null, maxDrawdownP05: null, paths: 0, steps: 0 }
+  if (returns.length < 2 || !Number.isFinite(initialCapital) || initialCapital <= 0 || !Number.isInteger(steps) || steps < 1 || steps > 504 || !Number.isInteger(paths) || paths < 1 || paths > 2000) return { density: { sessions: [], centers: [], width: 0, rows: [] }, terminalReturns: [], expectedTerminal: null, fan: [], trajectories: [], terminalP05: null, terminalMedian: null, terminalP95: null, probabilityOfLoss: null, maxDrawdownP05: null, paths: 0, steps: 0 }
   const generator = { value: (seed >>> 0) || 1 }
   const random = () => { generator.value = (1664525 * generator.value + 1013904223) >>> 0; return generator.value / 4_294_967_296 }
   const samples: number[][] = Array.from({ length: steps + 1 }, () => [])
   const drawdowns: number[] = [], terminalValues: number[] = []
   const safeReturns = returns.filter(value => Number.isFinite(value) && value > -1)
-  if (safeReturns.length < 2) return { fan: [], trajectories: [], terminalP05: null, terminalMedian: null, terminalP95: null, probabilityOfLoss: null, maxDrawdownP05: null, paths: 0, steps: 0 }
+  if (safeReturns.length < 2) return { density: { sessions: [], centers: [], width: 0, rows: [] }, terminalReturns: [], expectedTerminal: null, fan: [], trajectories: [], terminalP05: null, terminalMedian: null, terminalP95: null, probabilityOfLoss: null, maxDrawdownP05: null, paths: 0, steps: 0 }
   const trajectories: number[][] = []
   const trajectoryLimit = Math.max(0, Math.min(paths, Math.floor(displayedPaths)))
   for (let path = 0; path < paths; path += 1) {
@@ -239,6 +239,20 @@ export function monteCarloBootstrap(returns: number[], initialCapital: number, s
     if (trajectory) trajectories.push(trajectory)
     terminalValues.push(value); drawdowns.push(maxDD)
   }
-  const fan = samples.map((values, step) => ({ step, p05: quantile(values, 0.05)!, median: quantile(values, 0.5)!, p95: quantile(values, 0.95)! }))
-  return { fan, trajectories, terminalP05: quantile(terminalValues, 0.05), terminalMedian: quantile(terminalValues, 0.5), terminalP95: quantile(terminalValues, 0.95), probabilityOfLoss: terminalValues.filter(value => value < initialCapital).length / paths, maxDrawdownP05: quantile(drawdowns, 0.05), paths, steps }
+  const fan = samples.map((values, step) => {
+    values.sort((a, b) => a - b)
+    const at = (p: number) => { const i = (paths - 1) * p; return values[Math.floor(i)] + (values[Math.ceil(i)] - values[Math.floor(i)]) * (i % 1) }
+    return { step, p05: at(0.05), median: at(0.5), p95: at(0.95) }
+  })
+  const sessions = fan.filter(({ step }) => step % Math.ceil(steps / 40) === 0 || step === steps).map(point => point.step)
+  const low = Math.min(...sessions.map(i => samples[i][0])), high = Math.max(...sessions.map(i => samples[i][paths - 1]))
+  const width = high > low ? (high - low) / 40 : Math.max(initialCapital * 0.0001, 0.000001)
+  const start = high > low ? low : low - width * 20.5
+  const centers = Array.from({ length: 40 }, (_, i) => start + (i + 0.5) * width)
+  const rows = sessions.map(i => {
+    const counts = centers.map(() => 0)
+    for (const v of samples[i]) counts[Math.max(0, Math.min(39, Math.floor((v - start) / width)))]++
+    return counts.map(count => count / (paths * width))
+  })
+  return { density: { sessions, centers, width, rows }, expectedTerminal: mean(terminalValues), terminalReturns: terminalValues.map(v => v / initialCapital - 1), fan, trajectories, terminalP05: quantile(terminalValues, 0.05), terminalMedian: quantile(terminalValues, 0.5), terminalP95: quantile(terminalValues, 0.95), probabilityOfLoss: terminalValues.filter(value => value < initialCapital).length / paths, maxDrawdownP05: quantile(drawdowns, 0.05), paths, steps }
 }

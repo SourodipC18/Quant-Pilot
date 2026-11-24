@@ -319,6 +319,13 @@ h2 { margin: 4px 0 0; font-size: 13px; letter-spacing: -.015em; font-weight: 650
 .optimization-plot-help { border-top: 1px solid var(--border); text-align: center; }
 .optimization-canvas { height: clamp(325px, 53vh, 565px); background: radial-gradient(ellipse at center, var(--accent-soft), transparent 78%); cursor: grab; }
 .optimization-canvas:active { cursor: grabbing; }
+.surface-shell { padding: 12px; background: var(--surface); margin-block: 10px; }
+.surface-shell:fullscreen { overflow: auto; padding: 4vw; }
+.surface-shell canvas { cursor: grab; touch-action: none; }
+.surface-shell canvas:active { cursor: grabbing; }
+.range-tabs:is([aria-label="Strategy visualization"], [aria-label="Simulation visualization"]) { display: flex; flex-wrap: wrap; gap: 4px; width: fit-content; margin-block: 10px; }
+.range-tabs:is([aria-label="Strategy visualization"], [aria-label="Simulation visualization"]) button { height: auto; min-height: 34px; padding: 6px 12px; font-size: 12px; }
+.range-tabs:is([aria-label="Strategy visualization"], [aria-label="Simulation visualization"]) .active { border-bottom: 2px solid var(--foreground); }
 .optimization-plot-area { position: relative; }
 .optimization-tooltip { position: absolute; top: 9px; right: 9px; max-width: min(230px, calc(100% - 18px)); padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--foreground); pointer-events: none; font-size: 11px; box-shadow: 0 4px 16px #0002; }
 .optimization-tooltip p { color: var(--muted); margin: 4px 0 0; line-height: 1.4; overflow-wrap: anywhere; }

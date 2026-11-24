@@ -352,6 +352,16 @@ npm run build
 
 ---
 
+## Phase 6C.1 — Advanced 3D analytics
+
+**Monte Carlo → Simulation universe.** Select an instrument, sample allocation, saved portfolio or the read-only paper account. The seed, horizon and path count control a daily historical bootstrap (20–504 sessions, 100–2,000 paths). Switch between trajectories, a time/value probability-density surface and terminal return counts. Each density slice uses all paths and integrates to one across equal-width value bins. Only the rendered time grid and trajectory cloud are thinned. Expected ending value is the arithmetic mean; downside risk includes the fifth percentile of path maximum drawdowns.
+
+Portfolio draws preserve same-session cross-asset dependence: each matched return vector is projected onto fixed weights before sampling. Samples use target allocations; saved and paper positions use share counts times closing prices on the latest aligned return date. Saved portfolios assume no idle cash; paper cash remains a zero-return allocation. These are daily rebalanced scenarios, not reconstructions of historical trades. Mixed currencies are not converted. Paper trading retains its existing USD-only rules; verified USD and INR histories use the existing Twelve Data and Upstox routes.
+
+**Strategy Lab → Strategy optimization.** Set the fast and slow ranges, integer step and ranking metric, then evaluate up to 144 pairs. The existing SMA/EMA backtester runs on the first 70% of at most 1,000 chronological bars. Only training scores determine the winner; a fresh, flat account tests that pair on the final 30%, including its own indicator warm-up. Costs and next-bar execution match the configured strategy. Undefined scores are unavailable rather than zero. The heatmap, 3D mesh, comparison table and CSV expose the same training grid. Historical selection is not evidence of future performance.
+
+Both 3D surfaces load on demand and reuse the Efficient Frontier’s camera and axis components. Rotate, zoom, reset or enter fullscreen; 2D alternatives remain available without WebGL.
+
 ## Quantitative Methodologies
 
 QuantPilot incorporates established financial and statistical methodologies.
