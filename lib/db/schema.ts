@@ -52,11 +52,13 @@ const fixed = (name: string) => bigint(name, { mode: 'bigint' })
 const eventTime = (name = 'created_at') => timestamp(name, { withTimezone: true }).notNull().defaultNow()
 const paperScope = () => ({ userId: text('user_id').notNull(), accountId: uuid('account_id').notNull() })
 
+import type { Limits, SimOrder, Journal } from '../paper-orders'
+export const paperOrders = pgTable('paper_orders', { ...paperScope(), id:uuid('id').notNull(), detail:jsonb('detail').$type<SimOrder>().notNull() }, t=>[primaryKey({columns:[t.userId,t.accountId,t.id]})])
 export const paperAccounts = pgTable('paper_accounts', {
   userId: text('user_id').primaryKey(), id: uuid('id').notNull().unique(),
   cashCents: fixed('cash_cents').notNull().default(500_000_000n), realizedCents: fixed('realized_cents').notNull().default(0n),
   commissionBps: integer('commission_bps').notNull().default(0), slippageBps: integer('slippage_bps').notNull().default(0),
-  openedAt: eventTime('opened_at'),
+  openedAt: eventTime('opened_at'), riskLimits:jsonb('risk_limits').$type<Limits>().notNull().default({}),
 })
 export const paperPositions = pgTable('paper_positions', {
   ...paperScope(), symbol: text('symbol').notNull(), units: fixed('units').notNull(), basisCents: fixed('basis_cents').notNull(),
@@ -66,7 +68,7 @@ export const paperExecutions = pgTable('paper_executions', {
   ...paperScope(), id: uuid('id').notNull(), symbol: text('symbol').notNull(), side: text('side', { enum: ['buy', 'sell'] }).notNull(),
   units: fixed('units').notNull(), referenceMicros: fixed('reference_micros').notNull(), fillMicros: fixed('fill_micros').notNull(),
   notionalCents: fixed('notional_cents').notNull(), commissionCents: fixed('commission_cents').notNull(), slippageBps: integer('slippage_bps').notNull(),
-  realizedCents: fixed('realized_cents'), markDate: text('mark_date').notNull(), createdAt: eventTime(),
+  journal:jsonb('journal').$type<Journal>().notNull().default({}), realizedCents: fixed('realized_cents'), markDate: text('mark_date').notNull(), createdAt: eventTime(),
 }, t => [primaryKey({ columns: [t.userId, t.accountId, t.id] }), index('paper_executions_recent_idx').on(t.userId, t.accountId, t.createdAt.desc(), t.id.desc())])
 export const paperCashLedger = pgTable('paper_cash_ledger', {
   ...paperScope(), id: uuid('id').notNull(), kind: text('kind', { enum: ['funding', 'fill'] }).notNull(),

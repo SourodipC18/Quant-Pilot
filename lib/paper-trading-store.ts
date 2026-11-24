@@ -2,7 +2,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { and, asc, count, desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from './db'
-import { paperAccounts, paperCashLedger, paperEquitySnapshots, paperExecutions, paperPositions } from './db/schema'
+import { event, executableBar, expiry, matchOrder, micros, reservations, validateTerms, type Journal, type Limits, type SimOrder, type Terms } from './paper-orders'
+import { paperOrders, paperAccounts, paperCashLedger, paperEquitySnapshots, paperExecutions, paperPositions } from './db/schema'
 import { applyFill, dollarsNumber, estimateOrder, marketValue, PaperError, priceNumber, sharesNumber, STARTING_CASH, type PaperCosts, type PaperMode, type PaperSide } from './paper-trading-math'
 import { getPaperClose, markOrder, paperQuote, type VerifiedClose } from './paper-trading-prices'
 import type { PaperAccount, PaperBasketResult, PaperBasketReview, PaperComparison, PaperFill, PaperPortfolio, PaperReview } from './paper-trading-types'
@@ -14,7 +15,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type Account = typeof paperAccounts.$inferSelect
 type Position = typeof paperPositions.$inferSelect
 type Execution = typeof paperExecutions.$inferSelect
-type ScopedTable = typeof paperPositions | typeof paperExecutions | typeof paperCashLedger | typeof paperEquitySnapshots
+type ScopedTable = typeof paperOrders | typeof paperPositions | typeof paperExecutions | typeof paperCashLedger | typeof paperEquitySnapshots
 const scope = (table: ScopedTable, account: Account) => and(eq(table.userId, account.userId), eq(table.accountId, account.id))
 const accountScope = (account: Account) => and(eq(paperAccounts.userId, account.userId), eq(paperAccounts.id, account.id))
 const orderScope = (account: Account, id: string) => and(scope(paperExecutions, account), eq(paperExecutions.id, id))
@@ -83,7 +84,7 @@ const holdings = (positions: Position[]) => positions.map(row => ({ symbol: row.
 
 function fill(row: Execution): PaperFill {
   return {
-    id: row.id, createdAt: row.createdAt.toISOString(), symbol: row.symbol, side: row.side, shares: sharesNumber(row.units),
+    journal:row.journal ?? {}, id: row.id, createdAt: row.createdAt.toISOString(), symbol: row.symbol, side: row.side, shares: sharesNumber(row.units),
     fillPrice: priceNumber(row.fillMicros), referencePrice: priceNumber(row.referenceMicros), notional: dollarsNumber(row.notionalCents),
     commission: dollarsNumber(row.commissionCents), realized: row.realizedCents === null ? null : dollarsNumber(row.realizedCents),
     slippageBps: row.slippageBps, markDate: row.markDate,
@@ -102,16 +103,15 @@ export async function loadPaperAccount(userId: string): Promise<PaperAccount> {
 
 const accountSummary = (userId: string, unavailableMarks: number): Promise<PaperAccount> => withAccount(userId, async (tx, account) => {
   const positions = await listPositions(tx, account)
-  const recent = await listTrades(tx, account).limit(50)
+  const recent = await listTrades(tx, account)
+  const orders = await readOrders(tx,account), reserved = reservations(orders,'').cash
   const [{ value: completedTrades }] = await tx.select({ value: count() }).from(paperExecutions).where(scope(paperExecutions, account))
-  const latest = await tx.select().from(paperEquitySnapshots).where(scope(paperEquitySnapshots, account)).orderBy(desc(paperEquitySnapshots.id)).limit(250)
-  const [first] = latest.length === 250 ? await tx.select().from(paperEquitySnapshots).where(scope(paperEquitySnapshots, account)).orderBy(asc(paperEquitySnapshots.id)).limit(1) : []
-  const rows = latest.reverse()
-  if (first && first.id !== rows[0]?.id) rows.unshift(first)
+  const rows = await tx.select().from(paperEquitySnapshots).where(scope(paperEquitySnapshots, account)).orderBy(asc(paperEquitySnapshots.id))
+  const prior = rows.findLast(row => row.createdAt.toISOString().slice(0,10) < new Date().toISOString().slice(0,10))
   const totals = accountTotals(positions)
   const equity = account.cashCents + totals.marketValue
   return {
-    accountId: account.id, startingCash: dollarsNumber(STARTING_CASH), cash: dollarsNumber(account.cashCents), buyingPower: dollarsNumber(account.cashCents),
+    accountId: account.id, startingCash: dollarsNumber(STARTING_CASH), cash: dollarsNumber(account.cashCents), buyingPower: dollarsNumber(account.cashCents-reserved), orders, reserved:dollarsNumber(reserved), limits:account.riskLimits ?? {}, dailyPnl:dollarsNumber(equity-(prior ? prior.cashCents+prior.marketValueCents : STARTING_CASH)),
     equity: dollarsNumber(equity), invested: dollarsNumber(totals.invested), marketValue: dollarsNumber(totals.marketValue),
     realized: dollarsNumber(account.realizedCents), unrealized: dollarsNumber(totals.marketValue - totals.invested), unavailableMarks,
     totalReturn: Number(equity - STARTING_CASH) / Number(STARTING_CASH), costs: { commissionBps: account.commissionBps, slippageBps: account.slippageBps }, completedTrades,
@@ -133,6 +133,8 @@ export async function reviewPaperOrder(userId: string, order: OrderInput): Promi
     const est = estimateOrder(order.side, order.mode, order.amount, close.priceMicros, account)
     const position = await livePosition(tx, account, close.symbol)
     if (position && markOrder(position.markDate) > markOrder(close.date)) throw new PaperError('A newer price is required for this position.', 503)
+    if(!executableBar(close.date,new Date()))throw new PaperError('No fresh regular-session execution bar. Use a conditional order or return during market hours.')
+    await guard(tx,account,close.symbol,order.side,est)
     applyFill(account.cashCents, position, order.side, est)
     const expiresAt = Date.now() + 90_000
     const review: Ticket = {
@@ -152,12 +154,14 @@ function validateReview(account: Account, order: { expiresAt: number } & PaperCo
   if (account.commissionBps !== order.commissionBps || account.slippageBps !== order.slippageBps) throw new PaperError('Trading costs changed. Review the order again.', 409)
 }
 
-async function executeLockedFill(tx: Tx, account: Account, order: Ticket) {
+async function executeLockedFill(tx: Tx, account: Account, order: Ticket, pending?: SimOrder) {
+  if (!executableBar(order.date,new Date())) throw new PaperError('Execution requires a fresh completed five-minute bar during the regular US session. Delayed and end-of-day marks are valuation only.',409)
   const userId = account.userId
   const referenceMicros = BigInt(order.priceMicros)
   const est = estimateOrder(order.side, order.mode, order.amount, referenceMicros, account)
   const position = await livePosition(tx, account, order.symbol)
   if (position && markOrder(position.markDate) > markOrder(order.date)) throw new PaperError('A newer price is available. Review the order again.', 409)
+  await guard(tx,account,order.symbol,order.side,est,pending)
   const next = applyFill(account.cashCents, position, order.side, est)
   const owned = { userId, accountId: account.id }
   const positionFilter = and(scope(paperPositions, account), eq(paperPositions.symbol, order.symbol))
@@ -251,16 +255,18 @@ export function confirmPaperBasket(userId: string, ticket: string): Promise<Pape
 
 export const updatePaperCosts = (userId: string, id: string, costs: PaperCosts) => withAccount(userId, async (tx, account) => {
   requireGeneration(account, id)
+  if((await readOrders(tx,account)).some(o=>o.status==='pending')) throw new PaperError('Cancel pending orders before changing trading costs.')
   await tx.update(paperAccounts).set(costs).where(accountScope(account))
 })
 
 export const resetPaperAccount = (userId: string, id: string) => withAccount(userId, async (tx, account) => {
   requireGeneration(account, id)
+  await tx.delete(paperOrders).where(scope(paperOrders,account))
   await tx.delete(paperPositions).where(scope(paperPositions, account))
   await tx.delete(paperExecutions).where(scope(paperExecutions, account))
   await tx.delete(paperCashLedger).where(scope(paperCashLedger, account))
   await tx.delete(paperEquitySnapshots).where(scope(paperEquitySnapshots, account))
-  const [reset] = await tx.update(paperAccounts).set({ id: crypto.randomUUID(), openedAt: new Date(), cashCents: STARTING_CASH, realizedCents: 0n, commissionBps: 0, slippageBps: 0 }).where(accountScope(account)).returning()
+  const [reset] = await tx.update(paperAccounts).set({ id: crypto.randomUUID(), openedAt: new Date(), riskLimits:{}, cashCents: STARTING_CASH, realizedCents: 0n, commissionBps: 0, slippageBps: 0 }).where(accountScope(account)).returning()
   await recordFunding(tx, reset)
 })
 
@@ -294,9 +300,62 @@ async function refreshAccountMarks(userId: string, expectedId?: string) {
   })
 }
 
+const saveOrder = (tx:Tx,a:Account,o:SimOrder) => tx.update(paperOrders).set({detail:o}).where(and(scope(paperOrders,a),eq(paperOrders.id,o.id)))
+const addOrder = (tx:Tx,a:Account,o:SimOrder) => tx.insert(paperOrders).values({userId:a.userId,accountId:a.id,id:o.id,detail:o})
+async function readOrders(tx:Tx,a:Account){
+  const rows=await tx.select().from(paperOrders).where(scope(paperOrders,a)); const orders=rows.map(r=>r.detail)
+  for(const o of orders) if(o.status==='pending'&&o.expiry&&Date.parse(o.expiry)<=Date.now()) await saveOrder(tx,a,event(o,'expired','Day cutoff reached.'))
+  return orders.sort((x,y)=>x.since.localeCompare(y.since)||x.id.localeCompare(y.id))
+}
+async function guard(tx:Tx,a:Account,symbol:string,side:PaperSide,est:ReturnType<typeof estimateOrder>,exclude?:SimOrder){
+  const orders=await readOrders(tx,a), held=reservations(orders,symbol,exclude), positions=await listPositions(tx,a), p=positions.find(x=>x.symbol===symbol)
+  if(side==='buy' && -est.deltaCents>a.cashCents-held.cash) throw new PaperError('Insufficient available cash after pending reservations.',409)
+  if(side==='sell' && est.units>(p?.units??0n)-held.units) throw new PaperError('Insufficient unreserved shares.',409)
+  const limits=a.riskLimits??{}
+  if(limits.order && dollarsNumber(est.notionalCents)>limits.order) throw new PaperError('Maximum order value exceeded.')
+  if(side==='sell'||!Object.keys(limits).length)return
+  const values=new Map(positions.map(p=>[p.symbol,dollarsNumber(marketValue(p.units,p.symbol===symbol?est.referenceMicros:p.markMicros))]));const equity=dollarsNumber(a.cashCents)+[...values.values()].reduce((a,b)=>a+b,0)
+  for(const o of orders)if(o.status==='pending'&&o.side==='buy'&&o.id!==exclude?.id)values.set(o.symbol,(values.get(o.symbol)??0)+dollarsNumber(BigInt(o.reserve)))
+  values.set(symbol,(values.get(symbol)??0)+dollarsNumber(est.notionalCents));const concentration=[...values.values()].sort((a,b)=>b-a).slice(0,3).reduce((a,b)=>a+b,0)
+  if(limits.position && values.get(symbol)!*100>equity*limits.position || limits.concentration && concentration*100>equity*limits.concentration) throw new PaperError('Projected position allocation or top-three concentration exceeds your limit.')
+  if(limits.loss){const rows=await tx.select().from(paperEquitySnapshots).where(scope(paperEquitySnapshots,a)).orderBy(desc(paperEquitySnapshots.id));const prior=rows.find(x=>x.createdAt.toISOString().slice(0,10)<new Date().toISOString().slice(0,10));if(dollarsNumber(prior?prior.cashCents+prior.marketValueCents:STARTING_CASH)-equity+dollarsNumber(est.commissionCents)>=limits.loss)throw new PaperError('Daily loss limit reached. New exposure is blocked.')}
+}
+async function settle(tx:Tx,a:Account,o:SimOrder,q:VerifiedClose){
+  const result=await executeLockedFill(tx,a,{accountId:a.id,orderId:o.id,side:o.side,mode:'shares',amount:o.amount,symbol:o.symbol,priceMicros:String(q.priceMicros),date:q.date,expiresAt:Date.now(),commissionBps:a.commissionBps,slippageBps:a.slippageBps},o)
+  o.executionPrice=result.execution.fillPrice;await saveOrder(tx,a,event(o,'filled','Simulated fill at '+result.execution.fillPrice+' USD.'))
+  if(o.group)for(const sibling of await readOrders(tx,a))if(sibling.group===o.group&&sibling.status==='pending')await saveOrder(tx,a,event(sibling,'cancelled','Linked exit filled.'))
+  if(o.kind==='bracket')for(const kind of ['stop-loss','take-profit'] as const){const child:SimOrder={id:crypto.randomUUID(),group:o.id,symbol:o.symbol,kind,side:'sell',amount:o.amount,tif:o.tif,expiry:o.expiry,...(kind==='stop-loss'?{stop:o.stop}:{target:o.target}),reserve:'0',since:new Date().toISOString(),status:'pending',history:[]};await addOrder(tx,a,event(child,'pending','Protective exit armed after entry.'))}
+  await recordSnapshot(tx,result.account,await listPositions(tx,result.account));return result.account
+}
+export async function placeOrder(userId:string,accountId:string,id:string,symbol:string,t:Terms,modify=false,version?:number){
+  const q=await getPaperClose(symbol).catch(()=>null)
+  return withAccount(userId,async(tx,a)=>{requireGeneration(a,accountId);const orders=await readOrders(tx,a),old=orders.find(x=>x.id===id)
+    if(!modify&&old)return old
+    if(modify&&(!old||old.status!=='pending'||old.group||old.history.length!==version))throw new PaperError('Order changed or is a linked exit. Refresh before editing.',409)
+    const o:SimOrder={...t,symbol:q?.symbol??symbol,id,since:new Date().toISOString(),expiry:null,reserve:'0',status:'pending',history:[...(old?.history??[])]}
+    try{if(!q)throw new PaperError('A verified USD reference price is unavailable.');if(old&&old.symbol!==q.symbol)throw new PaperError('Modification cannot change the instrument.');o.expiry=expiry(t.tif,new Date());validateTerms(t,q.priceMicros)
+      const reference=t.side==='buy'?(t.limit&&['limit','stop-limit'].includes(t.kind)?micros(t.limit):t.kind==='stop'&&micros(t.stop!)>q.priceMicros?micros(t.stop!):q.priceMicros):q.priceMicros
+      const est=estimateOrder(t.side,'shares',t.amount,reference,a);await guard(tx,a,o.symbol,t.side,est,old);o.reserve=String(t.side==='buy'?-est.deltaCents:0n)
+      if((t.kind==='market'||t.kind==='bracket')&&!executableBar(q.date,new Date()))throw new PaperError('Market entry requires a fresh regular-session bar.')
+      if(t.kind==='bracket')validateTerms(t,est.fillMicros)
+      event(o,'pending',old?'Order modified; priority reset.':'Order accepted.')
+    }catch(e){if(!(e instanceof PaperError)||modify)throw e;event(o,'rejected',e.message)}
+    if(modify)await saveOrder(tx,a,o);else await addOrder(tx,a,o)
+    if(q&&o.status==='pending'&&(o.kind==='market'||o.kind==='bracket'))await settle(tx,a,o,q)
+    return o
+  })
+}
+export const cancelOrder=(userId:string,id:string,orderId:string)=>withAccount(userId,async(tx,a)=>{requireGeneration(a,id);const orders=await readOrders(tx,a),o=orders.find(x=>x.id===orderId);if(!o||o.status!=='pending')throw new PaperError('Order is no longer pending.',409);await saveOrder(tx,a,event(o,'cancelled','Cancelled by workspace owner.'))})
+export async function checkOrders(userId:string,id:string){
+  const pending=await withAccount(userId,async(tx,a)=>{requireGeneration(a,id);return (await readOrders(tx,a)).filter(o=>o.status==='pending')});const symbols=[...new Set(pending.map(o=>o.symbol))];const quotes=new Map<string,VerifiedClose>();for(let i=0;i<symbols.length;i+=4)await Promise.all(symbols.slice(i,i+4).map(async s=>{try{const q=await getPaperClose(s);if(q.symbol===s&&executableBar(q.date,new Date()))quotes.set(s,q)}catch{/* Keep reservations until a verified price is available. */}}))
+  return withAccount(userId,async(tx,account)=>{requireGeneration(account,id);let a=account,fills=0;const closed=new Set<string>();for(const o of await readOrders(tx,a)){const q=quotes.get(o.symbol);if(!q||o.status!=='pending'||o.group&&closed.has(o.group))continue;try{const m=matchOrder(o,q.priceMicros,q.date,a,new Date());if(m.trigger){o.triggered=true;o.lastBar=q.date;await saveOrder(tx,a,event(o,'pending','Stop triggered; waiting for a later qualifying limit bar.'))}if(m.fill){a=await settle(tx,a,o,q);fills++;if(o.group)closed.add(o.group)}}catch(e){if(!(e instanceof PaperError))throw e;await saveOrder(tx,a,event(o,'rejected',e.message))}}return {fills,unavailable:symbols.length-quotes.size}})
+}
+export const saveLimits=(userId:string,id:string,limits:Limits)=>withAccount(userId,async(tx,a)=>{requireGeneration(a,id);await tx.update(paperAccounts).set({riskLimits:limits}).where(accountScope(a))})
+export const saveJournal=(userId:string,id:string,fillId:string,journal:Journal)=>withAccount(userId,async(tx,a)=>{requireGeneration(a,id);const result=await tx.update(paperExecutions).set({journal}).where(orderScope(a,fillId)).returning({id:paperExecutions.id});if(!result.length)throw new PaperError('Execution not found.',404)})
+
 export const exportPaperTrades = (userId: string) => withAccount(userId, async (tx, account) => {
   const rows = (await listTrades(tx, account)).map(fill)
-  return ['execution_id,executed_at_utc,symbol,side,shares,reference_price_usd,fill_price_usd,notional_usd,commission_usd,slippage_bps,realized_pnl_usd,reference_close_date,price_type,simulation',
-    ...rows.map(row => [row.id, row.createdAt, row.symbol, row.side, row.shares, row.referencePrice, row.fillPrice, row.notional.toFixed(2), row.commission.toFixed(2), row.slippageBps, row.realized?.toFixed(2), row.markDate, 'End-of-day', 'paper'].join(',')),
+  return ['execution_id,executed_at_utc,symbol,side,shares,reference_price_usd,fill_price_usd,notional_usd,commission_usd,slippage_bps,realized_pnl_usd,reference_close_date,price_type,simulation,entry_reason,notes,strategy_tags',
+    ...rows.map(row => [row.id, row.createdAt, row.symbol, row.side, row.shares, row.referencePrice, row.fillPrice, row.notional.toFixed(2), row.commission.toFixed(2), row.slippageBps, row.realized?.toFixed(2), row.markDate, row.markDate.length===10?'End-of-day':'5-minute bar', 'paper', ...[row.journal?.reason,row.journal?.notes,row.journal?.tags].map(x=>'"'+(x??'').replace(/^(?=\s*[=+@-]|[\t\r\n])/,"'").replaceAll('"','""')+'"')].join(',')),
   ].join('\r\n')
 })

@@ -12,7 +12,7 @@ vi.mock('./paper-trading-prices', async importOriginal => ({ ...await importOrig
 const owner = 'guest:test-basket'
 const accountId = '12345678-1234-4123-a123-012345678901'
 const sample = SAMPLE_PORTFOLIOS[0]
-const markDate = '2025-11-04'
+const markDate = '2025-11-04T15:00:00.000Z'
 const dialect = new PgDialect()
 type Row = Record<string, unknown>
 type Tables = Record<string, Row[]>
@@ -41,7 +41,7 @@ function database(tables: Tables) {
       const name = getTableName(table)
       if (name === 'paper_accounts') return { onConflictDoNothing: () => ({ returning: async () => [] }) }
       if (name === 'paper_cash_ledger' && ++ledgerAttempt === 2 && rejectLedger) throw new Error('Test failure on the second ledger write')
-      const row = { ...value, createdAt: new Date(`${markDate}T00:00:00Z`) }
+      const row = { ...value, createdAt: new Date(markDate) }
       values(table).push(row)
       return { returning: async () => [row] }
     } }),
@@ -54,11 +54,12 @@ function database(tables: Tables) {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date(markDate))
   vi.stubEnv('BETTER_AUTH_SECRET', 'phase-6b-transaction-test-signing-secret')
   initial = {
     paper_accounts: [{ id: accountId, userId: owner, cashCents: STARTING_CASH, realizedCents: 0n, commissionBps: 12, slippageBps: 20 }],
     paper_positions: [{ userId: owner, accountId, symbol: sample.holdings[0].symbol, units: 1_000_000n, basisCents: 10_000n, markDate, markMicros: 100_000_000n }],
-    paper_executions: [], paper_cash_ledger: [], paper_equity_snapshots: [],
+    paper_orders: [], paper_executions: [], paper_cash_ledger: [], paper_equity_snapshots: [],
   }
   saved = structuredClone(initial)
   rejectLedger = false
@@ -72,7 +73,7 @@ beforeEach(() => {
     return result
   })
 })
-afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.clearAllMocks() })
 
 describe('trading account valuation', () => {
   it('marks a buy to market on account load, records gains and losses, and preserves the last verified price on failure', async () => {

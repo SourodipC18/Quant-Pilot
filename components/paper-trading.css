@@ -1,3 +1,4 @@
+.paper-desk-form {display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px;margin:16px 0}.paper-desk-form label,.paper-order-row {display:grid;gap:6px}.paper-desk-form p,.paper-desk-form button {grid-column:1/-1}.paper-order-row {padding:12px 0;border-bottom:1px solid var(--border)}.paper-order-row small,.paper-desk-form label {color:var(--muted);font-size:.85rem}.paper-desk-tools {margin:12px 0}.paper-dialog {max-height:85dvh;overflow:auto}
 .paper-terminal { display: flex; flex-direction: column; gap: 13px; min-width: 0; }
 .paper-mode-banner { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 9px 12px; }
 .paper-mode-banner p, .paper-note { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }

@@ -4,7 +4,8 @@ import { MarketDataError } from '@/lib/market-data'
 import { SYMBOL_PATTERN } from '@/lib/market-instruments'
 import { PaperError, parseOrderAmount } from '@/lib/paper-trading-math'
 import { getPaperClose, paperQuote } from '@/lib/paper-trading-prices'
-import { confirmPaperBasket, confirmPaperOrder, exportPaperTrades, loadPaperAccount, loadPaperComparison, loadPaperPortfolio, refreshPaperMarks, resetPaperAccount, reviewPaperBasket, reviewPaperOrder, updatePaperCosts } from '@/lib/paper-trading-store'
+import { riskSchema, termsSchema } from '@/lib/paper-orders'
+import { cancelOrder, checkOrders, placeOrder, saveJournal, saveLimits, confirmPaperBasket, confirmPaperOrder, exportPaperTrades, loadPaperAccount, loadPaperComparison, loadPaperPortfolio, refreshPaperMarks, resetPaperAccount, reviewPaperBasket, reviewPaperOrder, updatePaperCosts } from '@/lib/paper-trading-store'
 import { guestWorkspaceEnabled, resolveWorkspaceIdentity } from '@/lib/workspace-access'
 
 export const runtime = 'nodejs'
@@ -13,6 +14,10 @@ const symbol = z.string().trim().regex(SYMBOL_PATTERN).transform(value => value.
 const accountId = z.uuidv4()
 const bps = z.number().int().min(0).max(100)
 const input = z.discriminatedUnion('action', [
+  z.object({action:z.literal('place'),accountId,id:z.uuidv4(),symbol,terms:termsSchema}),
+  z.object({action:z.literal('modify'),accountId,id:z.uuidv4(),symbol,terms:termsSchema,version:z.number().int().positive()}),
+  z.object({action:z.literal('cancel'),accountId,id:z.uuidv4()}), z.object({action:z.literal('check'),accountId}),
+  z.object({action:z.literal('limits'),accountId,limits:riskSchema}),z.object({action:z.literal('journal'),accountId,id:z.uuidv4(),journal:z.object({notes:z.string().max(4000),reason:z.string().max(1000),tags:z.string().max(250)})}),
   z.object({ action: z.literal('review'), accountId, symbol, side: z.enum(['buy', 'sell']), mode: z.enum(['shares', 'dollars']), amount: z.string().trim().max(18) }),
   z.object({ action: z.literal('confirm'), ticket: z.string().min(1).max(2000) }),
   z.object({ action: z.literal('basket.review'), accountId, budget: z.string().trim().max(18), currency: z.literal('USD'), allocations: z.array(z.object({ symbol, weightBps: z.number().int().min(1).max(10_000) })).min(3).max(8) }),
@@ -62,6 +67,11 @@ export async function POST(request: NextRequest) {
     const parsed = input.safeParse(await request.json().catch(() => null))
     if (!parsed.success) return respond({ error: 'Check the submitted fields and try again.' }, 400)
     const data = parsed.data
+    if(data.action==='place'||data.action==='modify')return respond(await placeOrder(userId,data.accountId,data.id,data.symbol,data.terms,data.action==='modify',data.action==='modify'?data.version:undefined))
+    if(data.action==='check')return respond(await checkOrders(userId,data.accountId))
+    if(data.action==='cancel')await cancelOrder(userId,data.accountId,data.id)
+    if(data.action==='limits')await saveLimits(userId,data.accountId,data.limits)
+    if(data.action==='journal')await saveJournal(userId,data.accountId,data.id,data.journal)
     if (data.action === 'review') {
       parseOrderAmount(data.amount, data.mode)
       const { accountId, symbol, side, mode, amount } = data

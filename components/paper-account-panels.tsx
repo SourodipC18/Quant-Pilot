@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { ArrowDownToLine, ChartNoAxesCombined, Clock3, RefreshCw, RotateCcw, Settings2 } from 'lucide-react'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { PaperJournal } from './paper-journal'
+import { PaperTradeStats } from './paper-trade-stats'
 import { PaperEquityHistory } from './paper-trading-charts'
 import { PaperDialog, paperEndpoint, paperRequest, quantity, usd } from './paper-order-ticket'
 import { tradingPriceTime, type PaperAccount } from '@/lib/paper-trading-types'
@@ -21,8 +23,8 @@ export function PaperAccountStrip({ account, positionsSelected, onSelectPosition
   </section>
 }
 
-type ActivityView = 'positions' | 'trades' | 'performance'
-const views: { key: ActivityView; label: string }[] = [{ key: 'positions', label: 'Open positions' }, { key: 'trades', label: 'Transaction history' }, { key: 'performance', label: 'Account performance' }]
+type ActivityView = 'positions' | 'trades' | 'performance' | 'journal'
+const views: { key: ActivityView; label: string }[] = [{ key: 'positions', label: 'Open positions' }, { key: 'trades', label: 'Transaction history' }, { key: 'performance', label: 'Account performance' }, {key:'journal',label:'Trade journal'}]
 
 export function PaperAccountPanels({ account, view, onView, onUpdate, onPosition }: {
   account: PaperAccount; view: ActivityView; onView: (view: ActivityView) => void; onUpdate: () => Promise<unknown>; onPosition: (symbol: string) => void;
@@ -52,7 +54,9 @@ export function PaperAccountPanels({ account, view, onView, onUpdate, onPosition
   }
 
   const metrics: { label: string; value: string; detail: string }[] = [
-    { label: 'Available cash', value: usd(account.cash), detail: 'Uninvested virtual cash' },
+    { label: 'Available cash', value: usd(account.buyingPower), detail: 'Unreserved virtual USD' },
+    {label:'Reserved cash',value:usd(account.reserved),detail:'Held for pending buy orders'},
+    {label:'Daily P&L',value:usd(account.dailyPnl),detail:'Change since the last pre-UTC-day snapshot' },
     { label: 'Invested capital', value: usd(account.invested), detail: 'Open-position cost basis, including buy fees' },
     { label: 'Portfolio market value', value: usd(account.marketValue), detail: 'Open positions at last verified prices' },
     { label: 'Realized P&L', value: usd(account.realized), detail: 'Net of simulated fees' },
@@ -76,13 +80,14 @@ export function PaperAccountPanels({ account, view, onView, onUpdate, onPosition
     </>}
     {view === 'trades' && <>
       <div className="paper-activity-meta"><p className="paper-note">{account.completedTrades > 50 ? 'Showing the latest 50 fills. Export CSV for the full ledger.' : `${account.completedTrades} completed simulated ${account.completedTrades === 1 ? 'trade' : 'trades'}.`}</p><a className="button small" href={`${paperEndpoint}?action=csv`} download><ArrowDownToLine size={13} aria-hidden="true" /> Export CSV</a></div>
-      {account.trades.length ? <div className="table-scroll"><table className="data-table"><caption className="sr-only">Completed simulated market fills in USD</caption><thead><tr><th>Executed</th><th>Symbol</th><th>Side</th><th>Shares</th><th>Fill price</th><th>Commission</th><th>Realized P&amp;L</th></tr></thead><tbody>{account.trades.map(row => <tr key={row.id}>
+      {account.trades.length ? <div className="table-scroll"><table className="data-table"><caption className="sr-only">Completed simulated market fills in USD</caption><thead><tr><th>Executed</th><th>Symbol</th><th>Side</th><th>Shares</th><th>Fill price</th><th>Commission</th><th>Realized P&amp;L</th></tr></thead><tbody>{account.trades.slice(0,50).map(row => <tr key={row.id}>
         <td><time dateTime={row.createdAt}>{new Date(row.createdAt).toLocaleString()}</time></td><td>{row.symbol}</td><td className={row.side === 'buy' ? 'positive' : 'negative'}>{row.side === 'buy' ? 'Buy' : 'Sell'}</td><td>{quantity(row.shares)}</td><td>{usd(row.fillPrice, 6)}<small className="paper-table-note">{tradingPriceTime(row.markDate)}</small></td><td>{usd(row.commission)}</td><td className={row.realized == null ? undefined : tone(row.realized)}>{usd(row.realized)}</td>
       </tr>)}</tbody></table></div> : <div className="paper-empty"><Clock3 size={19} aria-hidden="true" /><strong>No completed trades</strong><p>Confirmed simulated orders will appear here.</p></div>}
     </>}
+    {view==='journal'&&<PaperJournal account={account} reload={onUpdate}/>}
     {view === 'performance' && <>
       <div className="paper-metrics">{metrics.map(metric => <article className="metric-card" key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.detail}</small></article>)}</div>
-      <PaperEquityHistory history={account.history} />
+      <PaperEquityHistory history={account.history} /><PaperTradeStats account={account}/>
       <p className="paper-note">Equity includes cash. History uses the opening balance, simulated market fills and changes to verified position marks. It does not backfill market movements between those events.</p>
     </>}
     {dialog && <PaperDialog id="paper-control-title" busy={busy} onClose={close}>
